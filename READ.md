@@ -1,1 +1,0 @@
-A fault tolerate server
