@@ -137,22 +137,114 @@ proposer(v):
 	the "otherwise" means if all the v_a are nil
 */
 func (px *Paxos) doPropose(seq int, v interface{}) {
-	px.nPrep = px.doPrepare()
 	agree := &PaxosInst{seq: seq, nAgree: EMPTY_NUMBER, vAgree: v}
 	for {
+		px.nPrep = px.doPrepare()
 		prepCount := px.sendPrepareToAll(px.nPrep, agree)
 		if px.isMajority(prepCount) {
-			accCount := px.sendAcceptToAll(px.nPrep, agree)
+			accCount := px.sendAcceptToAll(px.nPrep, seq, v)
 			if px.isMajority(accCount) {
 				px.sendDecidedToAll(agree)
+				break
 			}
 		}
-		decided, _ := px.Status(seq)
-		fmt.Print(decided)
-		if decided {
-			break
+	}
+}
+
+func (px *Paxos) sendPrepareToAll(prepId int, agree *PaxosInst) int {
+	prepCount := 0
+	for _, peer := range px.peers {
+		ok, reply := px.sendPrepare(peer, agree.seq, prepId)
+		if ok && reply.Accept == OK {
+			prepCount += 1
+			if agree.nAgree < reply.NHiAccSeen {
+				agree.nAgree = reply.NHiAccSeen
+				agree.vAgree = reply.VHiAccSeen
+			}
 		}
 	}
+	if agree.nAgree == EMPTY_NUMBER {
+		agree.nAgree = prepId
+	}
+	return prepCount
+}
+
+func (px *Paxos) sendPrepare(peer string, seq int, prepId int) (bool, *PaxosReply) {
+	args := &PaxosArgs{Seq: seq, NPrep: prepId}
+	reply := &PaxosReply{}
+	ok := true
+	if peer == px.peers[px.me] {
+		px.ProcPrepare(args, reply)
+	} else {
+		ok = call(peer, "Paxos.ProcPrepare", args, reply)
+	}
+	return ok, reply
+}
+
+func (px *Paxos) ProcPrepare(args *PaxosArgs, reply *PaxosReply) error {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	if args.NPrep > px.nHiPrepSeen {
+		px.nHiPrepSeen = args.NPrep
+		reply.Seq = args.Seq
+		reply.NHiAccSeen = px.nHiAccSeen
+		reply.VHiAccSeen = px.vHiAccSeen
+		reply.Accept = OK
+	} else {
+		reply.Accept = REJECT
+	}
+	return nil
+}
+
+func (px *Paxos) doPrepare() int {
+	//px.mu.Lock()
+	//defer px.mu.Unlock()
+	nProp := px.nPrep
+	if nProp == EMPTY_NUMBER {
+		nProp = px.me
+	}
+	for px.nHiPrepSeen != EMPTY_NUMBER && nProp <= px.nHiPrepSeen {
+		nProp += len(px.peers)
+	}
+	return nProp
+}
+
+func (px *Paxos) sendAcceptToAll(prepId int, seq int, v interface{}) int {
+	accCount := 0
+	for _, peer := range px.peers {
+		ok, reply := px.sendAccept(peer, prepId, seq, v)
+		if ok && reply == OK {
+			accCount += 1
+		}
+	}
+	return accCount
+}
+
+func (px *Paxos) sendAccept(peer string, prepId int, seq int, v interface{}) (bool, string) {
+	args := &PaxosArgs{Seq: seq, NPrep: prepId, VPrep: v}
+	reply := &PaxosReply{}
+	ok := true
+	if peer == px.peers[px.me] {
+    	px.ProcAccept(args, reply)
+	} else {
+		ok = call(peer, "Paxos.ProcAccept", args, reply)
+	}
+	return ok, reply.Accept
+}
+
+func (px *Paxos) ProcAccept(args *PaxosArgs, reply *PaxosReply) error {
+	px.mu.Lock()
+	defer px.mu.Unlock()
+	if args.NPrep >= px.nHiPrepSeen {
+		px.nHiPrepSeen = args.NPrep
+		px.nHiAccSeen = args.NPrep
+		px.vHiAccSeen = args.VPrep
+
+		reply.Accept = OK
+	} else {
+		reply.Accept = REJECT
+	}
+	return nil
 }
 
 func (px *Paxos) sendDecidedToAll(agree *PaxosInst) {
@@ -176,116 +268,20 @@ func (px *Paxos) ProcDecided(args *PaxosArgs, reply *PaxosReply) error {
 	defer px.mu.Unlock()
 	_, ok := px.instances[args.Seq]
 	if !ok {
-		newInst := &PaxosInst{}
-		newInst.seq = args.Seq
-		newInst.nAgree = args.NPrep
-		newInst.vAgree = args.VPrep
-		newInst.decided = true
+		newInst := &PaxosInst{nAgree: EMPTY_NUMBER}
 		px.instances[args.Seq] = newInst
 	}
+	px.instances[args.Seq].seq = args.Seq
+	px.instances[args.Seq].nAgree = args.NPrep
+	px.instances[args.Seq].vAgree = args.VPrep
+	px.instances[args.Seq].decided = true
 	return nil
-}
-
-func (px *Paxos) sendAcceptToAll(accId int, agree *PaxosInst) int {
-	accCount := 0
-	for _, peer := range px.peers {
-		ok, reply := px.sendAccept(peer, agree)
-		if ok && reply == OK {
-			accCount += 1
-		}
-	}
-	return accCount
-}
-
-func (px *Paxos) sendAccept(peer string, agree *PaxosInst) (bool, string) {
-	args := &PaxosArgs{Seq: agree.seq, NPrep: agree.nAgree, VPrep: agree.vAgree}
-	reply := &PaxosReply{}
-	ok := true
-	if peer == px.peers[px.me] {
-		state := px.ProcAccept(args, reply)
-		if state != nil {
-			ok = false
-		}
-	} else {
-		ok = call(peer, "Paxos.ProcAccept", args, reply)
-	}
-
-	return ok, reply.Accept
-}
-
-func (px *Paxos) ProcAccept(args *PaxosArgs, reply *PaxosReply) error {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-	if args.NPrep >= px.nHiPrepSeen {
-		px.nHiPrepSeen = args.NPrep
-		px.nHiAccSeen = args.NPrep
-		px.vHiAccSeen = args.VPrep
-
-		reply.Accept = OK
-	} else {
-		reply.Accept = REJECT
-	}
-	return nil
-}
-
-func (px *Paxos) doPrepare() int {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-	nProp := px.nPrep
-	for nProp < px.nHiPrepSeen {
-		nProp += len(px.peers)
-	}
-	return nProp
 }
 
 func (px *Paxos) isMajority(count int) bool {
 	return count > len(px.peers)/2
 }
 
-func (px *Paxos) sendPrepareToAll(prepId int, agree *PaxosInst) int {
-	prepCount := 0
-	for _, peer := range px.peers {
-		ok, reply := px.sendPrepare(peer, agree.seq, prepId)
-		if ok && reply.Accept == OK {
-			prepCount += 1
-			if agree.nAgree < reply.NHiAccSeen {
-				agree.nAgree = reply.NHiAccSeen
-				agree.vAgree = reply.VHiAccSeen
-			}
-		}
-	}
-	return prepCount
-}
-
-func (px *Paxos) sendPrepare(peer string, seq int, prepId int) (bool, *PaxosReply) {
-	args := &PaxosArgs{Seq: seq, NPrep: prepId}
-	reply := &PaxosReply{}
-	ok := true
-	if peer == px.peers[px.me] {
-		state := px.ProcPrepare(args, reply)
-		if state != nil {
-			ok = false
-		}
-	} else {
-		ok = call(peer, "Paxos.ProcPrepare", args, reply)
-	}
-	return ok, reply
-}
-
-func (px *Paxos) ProcPrepare(args *PaxosArgs, reply *PaxosReply) error {
-	px.mu.Lock()
-	defer px.mu.Unlock()
-	if args.NPrep > px.nHiPrepSeen {
-		px.nHiPrepSeen = args.NPrep
-		reply.Seq = args.Seq
-		reply.NHiAccSeen = px.nHiAccSeen
-		reply.VHiAccSeen = px.vHiAccSeen
-		reply.Accept = OK
-	} else {
-		reply.Accept = REJECT
-	}
-	return nil
-}
 
 //
 // the application on this machine is done with
@@ -304,7 +300,13 @@ func (px *Paxos) Done(seq int) {
 //
 func (px *Paxos) Max() int {
 	// Your code here.
-	return 0
+	max := EMPTY_NUMBER
+	for m := range px.instances {
+		if m > max {
+			max = m
+		}
+	}
+	return max
 }
 
 //
@@ -349,11 +351,11 @@ func (px *Paxos) Min() int {
 //
 func (px *Paxos) Status(seq int) (bool, interface{}) {
 	// Your code here.
-	inst, ok := px.instances[px.me]
-	if ok && inst.decided {
-		return true, inst.vAgree
+	inst, ok := px.instances[seq]
+	if !ok {
+		return false, nil
 	}
-	return false, nil
+	return inst.decided, inst.vAgree
 }
 
 //
@@ -379,8 +381,9 @@ func Make(peers []string, me int, rpcs *rpc.Server) *Paxos {
 	px.me = me
 
 	// Your initialization code here.
-	px.nPrep = me
+	px.nPrep = EMPTY_NUMBER
 	px.nHiPrepSeen = EMPTY_NUMBER
+	px.nHiAccSeen = EMPTY_NUMBER
 	px.instances = make(map[int]*PaxosInst)
 
 	if rpcs != nil {
