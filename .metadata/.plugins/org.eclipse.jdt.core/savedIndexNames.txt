@@ -1,1 +1,0 @@
-INDEX VERSION 1.126+/Users/zhangyi/GitHub/MRServer/.metadata/.plugins/org.eclipse.jdt.core
