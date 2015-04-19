@@ -11,6 +11,8 @@ import "syscall"
 import "encoding/gob"
 import "math/rand"
 
+import "time"
+
 const Debug=0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -25,6 +27,9 @@ type Op struct {
   // Your definitions here.
   // Field names must start with capital letters,
   // otherwise RPC will break.
+	Key		string
+	Value	string
+	Dohash	bool
 }
 
 type KVPaxos struct {
@@ -36,18 +41,75 @@ type KVPaxos struct {
   px *paxos.Paxos
 
   // Your definitions here.
+	seqMap	map[string] int // map key to seq id
+	curSeq	int // Highest seq to be assigned
+	prevOp	Op  // must pass the full object
 }
 
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
-  return nil
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
+	key := args.Key
+	/*
+	seq, ok := kv.seqMap[key]
+	if !ok {
+		reply.Value = ""
+		return nil
+	} */
+	for {
+		// k-v not found
+		decided, op := kv.px.Status(seq)
+		if decided {
+			reply.Value = op.(Op).Value
+			break
+		}
+	}
+  	return nil
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
+fmt.Println("Put ", args.Key, " ", args.Value, "curSeq ", kv.curSeq, "me ", kv.me)
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
+	key := args.Key
+	value := args.Value
+	doHash := args.DoHash
+	
+	op := Op{Key:key, Value:value, Dohash: doHash}
+	seq := kv.curSeq
+	kv.curSeq++
+	fmt.Println("Wo cao nima !", kv.curSeq)
+	kv.seqMap[key] = seq 
+	if doHash {
+		reply.PreviousValue = kv.prevOp.Value
+	}
+	kv.px.Start(seq, op)
+	
+	
+	// Must wait a while to update, otherwise the Get function
+	// may get expired value with the same key, Client
+	// wait lowers the system latency but the consistency is not
+	// guarenteed
+	kv.wait(seq)
+  	return nil
+}
 
-  return nil
+
+func (kv *KVPaxos) wait(seq int) {
+	to := 10 * time.Millisecond
+  	for {
+  		decided, _ := kv.px.Status(seq)
+  		if decided == true {
+    		return 
+    	}
+    	time.Sleep(to)
+    	if to < 10 * time.Second {
+      	to *= 2
+    	}
+	}
 }
 
 // tell the server to shut itself down.
@@ -74,6 +136,10 @@ func StartServer(servers []string, me int) *KVPaxos {
   kv.me = me
 
   // Your initialization code here.
+  kv.curSeq = 0
+  kv.seqMap = make(map[string]int)
+  kv.prevOp = Op{}
+
 
   rpcs := rpc.NewServer()
   rpcs.Register(kv)

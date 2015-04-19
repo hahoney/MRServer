@@ -2,6 +2,7 @@ package kvpaxos
 
 import "net/rpc"
 import "fmt"
+import "math/rand"
 
 type Clerk struct {
   servers []string
@@ -56,7 +57,18 @@ func call(srv string, rpcname string,
 //
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
-  return ""
+	// strat from a random server and round robin
+	server := rand.Intn(len(ck.servers))
+	args := &GetArgs{Key: key}
+	reply := &GetReply{}
+	for {
+	    ok := call(ck.servers[server], "KVPaxos.Get", args, reply)
+		if ok {
+			break
+		}
+		server = (server + 1) % len(ck.servers)
+	}
+	return reply.Value
 }
 
 //
@@ -65,7 +77,20 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
-  return ""
+// Your put is completed only when the instance is decided on the machine
+	server := rand.Intn(len(ck.servers))
+	args := &PutArgs{Key: key, Value: value, DoHash: dohash}
+	reply := &PutReply{}
+	for {
+		ok := call(ck.servers[server], "KVPaxos.Put", args, reply)
+		if ok {
+			break
+		}
+	}
+	if dohash {
+		return reply.PreviousValue
+	}
+  	return ""
 }
 
 func (ck *Clerk) Put(key string, value string) {
