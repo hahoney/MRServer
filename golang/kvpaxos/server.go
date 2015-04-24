@@ -13,7 +13,7 @@ import "math/rand"
 
 import "time"
 
-const Debug=0
+const Debug=1
 
 const (
 	EMPTY_NUMBER = -1
@@ -55,57 +55,78 @@ type KVPaxos struct {
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
-	//kv.mu.Lock()
-	//defer kv.mu.Unlock()
-	kv.UpdateMap()
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	kv.UpdateMap(true)
 	seq, exist := kv.seqMap[args.Key]
 	if exist {
-		ok, value := kv.px.Status(seq)
-		if ok {
-			reply.Value = value.(Op).Value
-		} 
-	}	
+		for {
+			kv.wait(seq) 
+			ok, value := kv.px.Status(seq)
+			if ok {
+				//fmt.Println("seq is ", seq, " minseq is ", kv.px.Min(), " max is ", kv.px.Max())
+				reply.Value = value.(Op).Value
+				break
+			}
+		}
+	}
   	return nil
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
-	//kv.mu.Lock()
-	//defer kv.mu.Unlock()
-	kv.UpdateMap()
-	
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	kv.UpdateMap(true)
 	key := args.Key
 	value := args.Value
 	doHash := args.DoHash
 	op := Op{Key:key, Value:value, Dohash: doHash}
 	kv.curSeq++
 	seq := kv.curSeq
-	kv.seqMap[key] = seq 
+	kv.seqMap[key] = seq
+	kv.px.Start(seq, op)
+	kv.wait(seq) 
 	if doHash {
 		reply.PreviousValue = kv.prevOp.Value
-	}
-	kv.px.Start(seq, op)
-	kv.wait(seq)
-	
-	//_, v := kv.px.Status(kv.curSeq)
-	//fmt.Println("The value for key ", v.(Op).Key, " is ", v.(Op).Value)
-	
+	}		
   	return nil
 }
 
 // Update seqMap and th curSeq pt to max + 1
-func (kv *KVPaxos) UpdateMap() {
+func (kv *KVPaxos) UpdateMap(isPut bool) {
 	max := kv.px.Max()
-	seq := kv.curSeq
-	for seq <= max {
-		seq++
-		ok, value := kv.px.Status(seq)
-		if ok {
+	forgetList := make(map[int]bool)
+	result := max
+	for seq := kv.curSeq + 1; seq <= max; seq++{
+		decided, value := kv.px.Status(seq)
+		if decided {
+			_, ok := kv.seqMap[value.(Op).Key]
+			if ok {  // is already in map then overwrite should be recorded
+				forgetList[seq] = true
+			}
 			kv.seqMap[value.(Op).Key] = seq
+		} else { // seq is not decided
+			if value == nil { // not accepted
+				result = seq - 1
+				break
+			} else { // accepted by this node
+				kv.seqMap[value.(Op).Key] = seq
+			}
 		}
 	}
-	kv.curSeq = max
+	minSeq := kv.px.Min()
+	for {
+		if _, ok := forgetList[minSeq]; ok {
+			minSeq++
+		} else {
+			break
+		}
+	}
+	kv.px.Done(minSeq)
+	kv.curSeq = result
 }
+
 
 
 func (kv *KVPaxos) wait(seq int) {
