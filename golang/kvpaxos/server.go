@@ -1,3 +1,6 @@
+/*  Examples! examples! Cannot understand the outputs in test files.
+*/
+
 package kvpaxos
 
 import "net"
@@ -36,6 +39,7 @@ type Op struct {
 	Key		string
 	Value	string
 	Dohash	bool
+	TimeStamp int
 }
 
 type KVPaxos struct {
@@ -48,7 +52,8 @@ type KVPaxos struct {
 
   // Your definitions here.
 	seqMap	map[string] int // map key to seq id
-	curSeq	int // Highest seq to be assigned
+	curSeq	int // highest unbroken seq to fill or update a new key
+	// all seq less than curSeq are reachable
 	prevOp	Op
 }
 
@@ -63,7 +68,7 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 		for {
 			kv.wait(seq) 
 			ok, value := kv.px.Status(seq)
-			if ok {
+			if ok  {
 				//fmt.Println("seq is ", seq, " minseq is ", kv.px.Min(), " max is ", kv.px.Max())
 				reply.Value = value.(Op).Value
 				break
@@ -81,19 +86,27 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
 	key := args.Key
 	value := args.Value
 	doHash := args.DoHash
-	op := Op{Key:key, Value:value, Dohash: doHash}
-	kv.curSeq++
-	seq := kv.curSeq
-	kv.seqMap[key] = seq
+	time := kv.getNewTimeStamp()	
+	op := Op{Key:key, Value:value, Dohash: doHash, TimeStamp: time}
+	
+	seq := kv.curSeq + 1
 	kv.px.Start(seq, op)
-	kv.wait(seq) 
+	kv.wait(seq)
+	kv.seqMap[key] = seq
+	kv.curSeq++
+	// don not need to check time stamp in Put
+	// every time put seq is new
+	
 	if doHash {
 		reply.PreviousValue = kv.prevOp.Value
+		kv.prevOp = op
 	}		
   	return nil
 }
 
-// Update seqMap and th curSeq pt to max + 1
+/* Update seqMap and th curSeq pt to max. max is the highest
+   agreed seq by all majority nodes. Or if undecided value exists
+   return the lowest seq below which all seq have been agreed */ 
 func (kv *KVPaxos) UpdateMap(isPut bool) {
 	max := kv.px.Max()
 	forgetList := make(map[int]bool)
@@ -128,6 +141,17 @@ func (kv *KVPaxos) UpdateMap(isPut bool) {
 }
 
 
+func (kv *KVPaxos) getNewTimeStamp() int {
+	seq := kv.curSeq
+	result := 0
+	ok, value := kv.px.Status(seq)
+	if ok {
+		result = value.(Op).TimeStamp + 1
+	}
+	return result
+}
+
+
 
 func (kv *KVPaxos) wait(seq int) {
 	to := 10 * time.Millisecond
@@ -142,6 +166,7 @@ func (kv *KVPaxos) wait(seq int) {
     	}
 	}
 }
+
 
 // tell the server to shut itself down.
 // please do not change this function.
@@ -169,7 +194,7 @@ func StartServer(servers []string, me int) *KVPaxos {
   // Your initialization code here.
   kv.curSeq = -1
   kv.seqMap = make(map[string]int)
-  kv.prevOp = Op{}
+  kv.prevOp = Op{TimeStamp: EMPTY_NUMBER}
 
 
   rpcs := rpc.NewServer()
