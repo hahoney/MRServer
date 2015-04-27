@@ -39,7 +39,7 @@ func NextValue(hprev string, val string) string {
   return strconv.Itoa(int(h))
 }
 
-func TestBasic(t *testing.T) {
+func testBasic(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -114,7 +114,7 @@ func TestBasic(t *testing.T) {
   time.Sleep(1 * time.Second)
 }
 
-func TestDone(t *testing.T) {
+func testDone(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3

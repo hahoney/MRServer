@@ -39,7 +39,6 @@ type Op struct {
 	Key		string
 	Value	string
 	Dohash	bool
-	TimeStamp int
 }
 
 type KVPaxos struct {
@@ -60,19 +59,24 @@ type KVPaxos struct {
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
+  // How do we know whether other minority nodes are learning ?
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	kv.UpdateMap(true)
+	 kv.px.Status(kv.curSeq + 1)
+	//if value != nil { 
+		fmt.Println("hhahahahha ", kv.me)
+	//}
+	
 	seq, exist := kv.seqMap[args.Key]
 	if exist {
-		for {
-			kv.wait(seq) 
-			ok, value := kv.px.Status(seq)
-			if ok  {
-				//fmt.Println("seq is ", seq, " minseq is ", kv.px.Min(), " max is ", kv.px.Max())
-				reply.Value = value.(Op).Value
-				break
-			}
+		kv.wait(seq) 
+		ok, value := kv.px.Status(seq)
+		//fmt.Println("node ", kv.me, " seq ", seq, " key ", args.Key, " value ", value.(Op).Value)
+		if ok { // decided
+			//fmt.Println("seq is ", seq, " minseq is ", kv.px.Min(), " max is ", kv.px.Max())
+			reply.Value = value.(Op).Value
+					fmt.Println(kv.me, " wuwuuwuwuwuwuw ", value.(Op).Value)
 		}
 	}
   	return nil
@@ -85,17 +89,14 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
 	kv.UpdateMap(true)
 	key := args.Key
 	value := args.Value
-	doHash := args.DoHash
-	time := kv.getNewTimeStamp()	
-	op := Op{Key:key, Value:value, Dohash: doHash, TimeStamp: time}
+	doHash := args.DoHash	
+	op := Op{Key:key, Value:value, Dohash: doHash}
 	
 	seq := kv.curSeq + 1
 	kv.px.Start(seq, op)
 	kv.wait(seq)
 	kv.seqMap[key] = seq
 	kv.curSeq++
-	// don not need to check time stamp in Put
-	// every time put seq is new
 	
 	if doHash {
 		reply.PreviousValue = kv.prevOp.Value
@@ -120,7 +121,7 @@ func (kv *KVPaxos) UpdateMap(isPut bool) {
 			}
 			kv.seqMap[value.(Op).Key] = seq
 		} else { // seq is not decided
-			if value == nil { // not accepted
+			if value == nil  && isPut { // not accepted
 				result = seq - 1
 				break
 			} else { // accepted by this node
@@ -139,18 +140,6 @@ func (kv *KVPaxos) UpdateMap(isPut bool) {
 	kv.px.Done(minSeq)
 	kv.curSeq = result
 }
-
-
-func (kv *KVPaxos) getNewTimeStamp() int {
-	seq := kv.curSeq
-	result := 0
-	ok, value := kv.px.Status(seq)
-	if ok {
-		result = value.(Op).TimeStamp + 1
-	}
-	return result
-}
-
 
 
 func (kv *KVPaxos) wait(seq int) {
@@ -194,7 +183,7 @@ func StartServer(servers []string, me int) *KVPaxos {
   // Your initialization code here.
   kv.curSeq = -1
   kv.seqMap = make(map[string]int)
-  kv.prevOp = Op{TimeStamp: EMPTY_NUMBER}
+  kv.prevOp = Op{}
 
 
   rpcs := rpc.NewServer()
