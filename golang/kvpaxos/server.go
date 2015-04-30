@@ -1,4 +1,7 @@
-/*  Examples! examples! Cannot understand the outputs in test files.
+/* Keep Notes while working on the code
+   1 seqMap could expire, update the seqMap before Put and Get. 
+   Failed first time: seq has duplicate keys
+
 */
 
 package kvpaxos
@@ -20,6 +23,8 @@ const Debug=1
 
 const (
 	EMPTY_NUMBER = -1
+	GET_ID = 0
+	PUT_ID = 1
 	)
 
 
@@ -36,9 +41,10 @@ type Op struct {
   // Your definitions here.
   // Field names must start with capital letters,
   // otherwise RPC will break.
-	Key		string
-	Value	string
-	Dohash	bool
+	Key			string
+	Value		string
+	Dohash		bool
+	OperType	int
 }
 
 type KVPaxos struct {
@@ -51,9 +57,11 @@ type KVPaxos struct {
 
   // Your definitions here.
 	seqMap	map[string] int // map key to seq id
-	curSeq	int // highest unbroken seq to fill or update a new key
+	forgetList map[int] bool // seq to forget
+	curSeq	int // Highest seq number, remember that seq in px all continuous
 	// all seq less than curSeq are reachable
 	prevOp	Op
+	operId	int
 }
 
 
@@ -62,23 +70,36 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // How do we know whether other minority nodes are learning ?
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.UpdateMap(true)
-	 kv.px.Status(kv.curSeq + 1)
-	//if value != nil { 
-		fmt.Println("hhahahahha ", kv.me)
-	//}
+	kv.updateMap()
 	
-	seq, exist := kv.seqMap[args.Key]
+	op := kv.makeOp(args.Key, "wsn", false, GET_ID)
+	seq := kv.curSeq + 1
+	
+	for {
+		_, value := kv.px.Status(seq)
+		if value == nil {
+			kv.px.Start(seq, op)
+			kv.wait(seq)
+			break
+		}
+		seq++
+	}
+	
+	key := args.Key
+	seq, exist := kv.seqMap[key]
+
 	if exist {
-		kv.wait(seq) 
-		ok, value := kv.px.Status(seq)
-		//fmt.Println("node ", kv.me, " seq ", seq, " key ", args.Key, " value ", value.(Op).Value)
-		if ok { // decided
-			//fmt.Println("seq is ", seq, " minseq is ", kv.px.Min(), " max is ", kv.px.Max())
+		kv.wait(seq)
+		decided, value := kv.px.Status(seq)
+		if decided {
 			reply.Value = value.(Op).Value
-					fmt.Println(kv.me, " wuwuuwuwuwuwuw ", value.(Op).Value)
 		}
 	}
+	fmt.Println("Node ", kv.me)
+	kv.px.DumpValue()
+	kv.dumpSeqMap()
+	fmt.Println()
+	
   	return nil
 }
 
@@ -86,18 +107,48 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.UpdateMap(true)
-	key := args.Key
-	value := args.Value
-	doHash := args.DoHash	
-	op := Op{Key:key, Value:value, Dohash: doHash}
+	kv.updateMap()
+	op := kv.makeOp(args.Key, args.Value, args.DoHash, PUT_ID)
+	doHash := args.DoHash
+ 	seq := kv.curSeq + 1
+		
+	// How to overwrite decided seq ? Don't have to
+	// assign a new seq and start again
+	/*
+	for {
+		_, value := kv.px.Status(seq)
+		if value != nil {
+			check := value.(Op).Value
+			if check == op.Value {
+				break
+			} else {
+				seq++
+			}
+		}
+		kv.px.Start(seq, op)
+		kv.wait(seq)
+	} */
 	
-	seq := kv.curSeq + 1
-	kv.px.Start(seq, op)
-	kv.wait(seq)
-	kv.seqMap[key] = seq
-	kv.curSeq++
+	for {
+		_, value := kv.px.Status(seq)
+		
+		if value == nil {
+			kv.px.Start(seq, op)
+			kv.wait(seq)
+			continue
+		} else {
+			check := value.(Op).Value
+			if check == op.Value {
+				break
+			} else {
+				seq++
+			}
+		}
+	}
 	
+	fmt.Println("Node ", kv.me,  " put seq ", seq, " value ", args.Value)
+
+
 	if doHash {
 		reply.PreviousValue = kv.prevOp.Value
 		kv.prevOp = op
@@ -105,9 +156,82 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   	return nil
 }
 
+func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int) Op {
+	return Op{Key: key, Value: value, Dohash: doHash, OperType: operTyped}
+}
+
+/* Can I take the undecided value. What is the meaning
+of decided. Is it processing? or empty forever?
+A value undecided and empty is unaccepted
+A value undecided but not empty is accepted
+A value decided is decided
+we want those decided and to be decided values
+*/
+func (kv *KVPaxos) updateMap() {
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
+	max := kv.px.Max()
+	for seq := kv.curSeq + 1; seq <= max; seq++ {
+		decided, value := kv.px.Status(seq)
+		// forget all GET, do not update
+		if value != nil {
+			operType := value.(Op).OperType
+			if operType == GET_ID {
+				kv.forgetList[seq] = true
+				continue
+			}
+		}
+		// update seqMap and forget list when overwrite
+		if decided {
+			key := value.(Op).Key
+			if _, exist := kv.seqMap[key]; exist {
+				oldSeq := kv.seqMap[key]
+				kv.forgetList[oldSeq] = true
+			}		
+			kv.seqMap[key] = seq
+		} else {
+			if value != nil {
+				key := value.(Op).Key
+				kv.seqMap[key] = seq
+			}
+		}
+	}
+	// update min
+	minSeq := kv.px.Min()
+	for {
+		if ok, _ := kv.forgetList[minSeq]; ok {
+			delete(kv.forgetList, minSeq)
+			minSeq++
+		} else {
+			break
+		}
+	} 
+	kv.px.Done(minSeq - 1) 
+	kv.curSeq = max
+}
+
+
+func (kv *KVPaxos) dumpSeqMap() {
+	for key, seq := range kv.seqMap {
+		fmt.Print("Seq ", seq, " Key ", key, "# ")
+	}
+}
+
+
 /* Update seqMap and th curSeq pt to max. max is the highest
    agreed seq by all majority nodes. Or if undecided value exists
-   return the lowest seq below which all seq have been agreed */ 
+   return the lowest seq below which all seq have been agreed 
+   update a seq 1 2 3 4 5 6 7 8 
+   from 3 to 8 is not seen by a node yet. Update map
+   the curSeq is at 2
+   begin scan 3 if its key is same as one in the map, overwrite and save
+   the overwritten seq to the garbage list. if new, insert to the map
+   after the scan curSeq is at 8
+   1 could some seq be empty ? How to do with it
+   2 how to determine the garbage list
+   all new incoming seq must be larger than max
+*/ 
+/*
 func (kv *KVPaxos) UpdateMap(isPut bool) {
 	max := kv.px.Max()
 	forgetList := make(map[int]bool)
@@ -122,8 +246,8 @@ func (kv *KVPaxos) UpdateMap(isPut bool) {
 			kv.seqMap[value.(Op).Key] = seq
 		} else { // seq is not decided
 			if value == nil  && isPut { // not accepted
-				result = seq - 1
-				break
+				//result = seq - 1
+				//break
 			} else { // accepted by this node
 				kv.seqMap[value.(Op).Key] = seq
 			}
@@ -140,14 +264,14 @@ func (kv *KVPaxos) UpdateMap(isPut bool) {
 	kv.px.Done(minSeq)
 	kv.curSeq = result
 }
+*/
 
-
-func (kv *KVPaxos) wait(seq int) {
+func (kv *KVPaxos) wait(seq int) Op {
 	to := 10 * time.Millisecond
   	for {
-  		decided, _ := kv.px.Status(seq)
+  		decided, value := kv.px.Status(seq)
   		if decided == true {
-    		return 
+    		return value.(Op)
     	}
     	time.Sleep(to)
     	if to < 10 * time.Second {
@@ -181,9 +305,11 @@ func StartServer(servers []string, me int) *KVPaxos {
   kv.me = me
 
   // Your initialization code here.
-  kv.curSeq = -1
+  kv.curSeq = EMPTY_NUMBER
   kv.seqMap = make(map[string]int)
   kv.prevOp = Op{}
+  kv.operId = EMPTY_NUMBER
+  kv.forgetList = make(map[int]bool)
 
 
   rpcs := rpc.NewServer()

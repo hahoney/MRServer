@@ -12,6 +12,7 @@ func check(t *testing.T, ck *Clerk, key string, value string) {
   v := ck.Get(key)
   if v != value {
     t.Fatalf("Get(%v) -> %v, expected %v", key, v, value)
+	//t.Fatalf("Get(%v) -> %v, expected", key, v)
   }
 }
 
@@ -308,6 +309,15 @@ func TestPartition(t *testing.T) {
   if done1 {
     t.Fatalf("Get in minority completed")
   }
+/*
+  cka[0].Put("1", "wsn")
+	fmt.Println(0, " ", cka[0].Get("1"))
+  for i := 2; i <= 4; i++ {
+	fmt.Println(i, " ", cka[i].Get("1"))
+  } */
+
+
+
   check(t, cka[4], "1", "15")
   check(t, cka[0], "1", "15")
 
