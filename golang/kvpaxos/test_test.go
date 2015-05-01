@@ -40,7 +40,7 @@ func NextValue(hprev string, val string) string {
   return strconv.Itoa(int(h))
 }
 
-func testBasic(t *testing.T) {
+func TestBasic(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -225,7 +225,7 @@ func part(t *testing.T, tag string, npaxos int, p1 []int, p2 []int, p3 []int) {
   }
 }
 
-func TestPartition(t *testing.T) {
+func testPartition(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   tag := "partition"

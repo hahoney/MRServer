@@ -2,7 +2,9 @@ package kvpaxos
 
 import "net/rpc"
 import "fmt"
-import "math/rand"
+//import "math/rand"
+import "crypto/rand"
+import "math/big"
 
 type Clerk struct {
   servers []string
@@ -57,9 +59,8 @@ func call(srv string, rpcname string,
 //
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
-	// strat from a random server and round robin
-	server := rand.Intn(len(ck.servers))
-	args := &GetArgs{Key: key}
+	server := 0 //rand.Intn(len(ck.servers))
+	args := &GetArgs{Key: key, OpId: nrand()}
 	reply := &GetReply{}
 	for {
 	    ok := call(ck.servers[server], "KVPaxos.Get", args, reply)
@@ -78,8 +79,8 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
 // Your put is completed only when the instance is decided on the machine
-	server := rand.Intn(len(ck.servers))
-	args := &PutArgs{Key: key, Value: value, DoHash: dohash}
+	server := 0 //rand.Intn(len(ck.servers))
+	args := &PutArgs{Key: key, Value: value, DoHash: dohash, OpId: nrand()}
 	reply := &PutReply{}
 	for {
 		ok := call(ck.servers[server], "KVPaxos.Put", args, reply)
@@ -99,4 +100,11 @@ func (ck *Clerk) Put(key string, value string) {
 func (ck *Clerk) PutHash(key string, value string) string {
   v := ck.PutExt(key, value, true)
   return v
+}
+
+func nrand() int64 {
+	max := big.NewInt(int64(int64(1) << 62))
+	bigx, _ := rand.Int(rand.Reader, max)
+	x := bigx.Int64()
+	return x
 }

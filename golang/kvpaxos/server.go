@@ -45,6 +45,7 @@ type Op struct {
 	Value		string
 	Dohash		bool
 	OperType	int
+	OpId		int64
 }
 
 type KVPaxos struct {
@@ -64,6 +65,16 @@ type KVPaxos struct {
 	operId	int
 }
 
+/* Ok, I finally got it. Paxos learning procedure:
+if a server is left behind, it sends new proposed value
+to seq. If the majority has another value, they will respond
+and make new decision so that the sender will agree on that value
+the initially proposed value will be ignored.
+To update, start with any op, if it is different from what 
+we get, keep it and move to the next seq
+Where to stop? The seq at which the sent op and recv op are exactly the same
+*/
+
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
@@ -72,19 +83,28 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	defer kv.mu.Unlock()
 	kv.updateMap()
 	
-	op := kv.makeOp(args.Key, "wsn", false, GET_ID)
+	op := kv.makeOp(args.Key, "", false, GET_ID, args.OpId)
 	seq := kv.curSeq + 1
-	
-	for {
-		_, value := kv.px.Status(seq)
-		if value == nil {
+	ok := false
+	for !ok {
+		decided, value := kv.px.Status(seq)
+		
+		if !decided {
 			kv.px.Start(seq, op)
 			kv.wait(seq)
-			break
+		} else {
+			check := value.(Op).OpId
+			if check == op.OpId {
+				ok = true
+			} else {
+				op = value.(Op)
+				key := op.Key
+				kv.seqMap[key] = seq
+				seq++
+			}
 		}
-		seq++
 	}
-	
+
 	key := args.Key
 	seq, exist := kv.seqMap[key]
 
@@ -107,47 +127,32 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.updateMap()
-	op := kv.makeOp(args.Key, args.Value, args.DoHash, PUT_ID)
+	kv.updateMap() // Might miss some seq between two Put Ops
+	op := kv.makeOp(args.Key, args.Value, args.DoHash, PUT_ID, args.OpId)
 	doHash := args.DoHash
  	seq := kv.curSeq + 1
-		
-	// How to overwrite decided seq ? Don't have to
-	// assign a new seq and start again
-	/*
-	for {
-		_, value := kv.px.Status(seq)
-		if value != nil {
-			check := value.(Op).Value
-			if check == op.Value {
-				break
-			} else {
-				seq++
-			}
-		}
-		kv.px.Start(seq, op)
-		kv.wait(seq)
-	} */
 	
+	// Update the seq to keep consistency
 	for {
-		_, value := kv.px.Status(seq)
+		decided, value := kv.px.Status(seq)
 		
-		if value == nil {
+		if !decided {
 			kv.px.Start(seq, op)
 			kv.wait(seq)
-			continue
 		} else {
-			check := value.(Op).Value
-			if check == op.Value {
+			check := value.(Op).OpId
+			if check == op.OpId {
 				break
 			} else {
+				op = value.(Op)
+				key := op.Key
+				kv.seqMap[key] = seq
 				seq++
 			}
-		}
+		}		
 	}
 	
-	fmt.Println("Node ", kv.me,  " put seq ", seq, " value ", args.Value)
-
+	fmt.Println("Node ", kv.me,  " put seq ", seq, " Key ", args.Key, " value ", args.Value)
 
 	if doHash {
 		reply.PreviousValue = kv.prevOp.Value
@@ -156,8 +161,8 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   	return nil
 }
 
-func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int) Op {
-	return Op{Key: key, Value: value, Dohash: doHash, OperType: operTyped}
+func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int, opId int64) Op {
+	return Op{Key: key, Value: value, Dohash: doHash, OperType: operTyped, OpId: opId}
 }
 
 /* Can I take the undecided value. What is the meaning
