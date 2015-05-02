@@ -87,6 +87,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 		if ok {
 			break
 		}
+		server = (server + 1) % len(ck.servers)
 	}
 	if dohash {
 		return reply.PreviousValue

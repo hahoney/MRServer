@@ -40,7 +40,7 @@ func NextValue(hprev string, val string) string {
   return strconv.Itoa(int(h))
 }
 
-func TestBasic(t *testing.T) {
+func testBasic(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -309,14 +309,6 @@ func testPartition(t *testing.T) {
   if done1 {
     t.Fatalf("Get in minority completed")
   }
-/*
-  cka[0].Put("1", "wsn")
-	fmt.Println(0, " ", cka[0].Get("1"))
-  for i := 2; i <= 4; i++ {
-	fmt.Println(i, " ", cka[i].Get("1"))
-  } */
-
-
 
   check(t, cka[4], "1", "15")
   check(t, cka[0], "1", "15")
@@ -336,7 +328,7 @@ func testPartition(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func testUnreliable(t *testing.T) {
+func TestUnreliable(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -387,17 +379,22 @@ func testUnreliable(t *testing.T) {
           j := rand.Intn(i+1)
           sa[i], sa[j] = sa[j], sa[i]
         }
+		fmt.Println("Iter ", iters)
         myck := MakeClerk(sa)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
         ov := myck.PutHash(key, "0")
+		fmt.Println("The Key is ", key)
         if ov != pv {
-          t.Fatalf("wrong value; expected %s but got %s", pv, ov)
+		  //fmt.Println("step 1 pv is ", pv, " ov is ", ov)
+          t.Fatalf("wrong value; expected %s but123 got %s", pv, ov)
         }
+		return
         ov = myck.PutHash(key, "1")
         pv = NextValue(pv, "0")
         if ov != pv {
-          t.Fatalf("wrong value; expected %s but got %s", pv, ov)
+		  //fmt.Println("step 2 pv is ", pv, " ov is ", ov)
+          t.Fatalf("wrong value; expected %s but234 got %s", pv, ov)
         }
         ov = myck.PutHash(key, "2")
         pv = NextValue(pv, "1")

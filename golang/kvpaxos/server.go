@@ -58,10 +58,12 @@ type KVPaxos struct {
 
   // Your definitions here.
 	seqMap	map[string] int // map key to seq id
+	prevValues map[string] string
+	curValues  map[string] string
 	forgetList map[int] bool // seq to forget
 	curSeq	int // Highest seq number, remember that seq in px all continuous
 	// all seq less than curSeq are reachable
-	prevOp	Op
+	prevValue	string
 	operId	int
 }
 
@@ -85,21 +87,22 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	
 	op := kv.makeOp(args.Key, "", false, GET_ID, args.OpId)
 	seq := kv.curSeq + 1
-	ok := false
-	for !ok {
+	for {
 		decided, value := kv.px.Status(seq)
 		
 		if !decided {
 			kv.px.Start(seq, op)
 			kv.wait(seq)
 		} else {
-			check := value.(Op).OpId
-			if check == op.OpId {
-				ok = true
+			check := value.(Op)
+			if check.OpId == op.OpId {
+				break
 			} else {
-				op = value.(Op)
-				key := op.Key
-				kv.seqMap[key] = seq
+				if check.OperType == PUT_ID {
+					key := check.Key
+					kv.seqMap[key] = seq
+					kv.prevValues[key] = check.Value
+				}
 				seq++
 			}
 		}
@@ -107,18 +110,27 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 
 	key := args.Key
 	seq, exist := kv.seqMap[key]
-
+	
 	if exist {
-		kv.wait(seq)
-		decided, value := kv.px.Status(seq)
-		if decided {
+		_, value := kv.px.Status(seq)
+		//if decided {
 			reply.Value = value.(Op).Value
-		}
+			//kv.prevValue = value.(Op).Value
+			if kv.prevValues[args.Key] != value.(Op).Value {
+				kv.prevValues[args.Key] = value.(Op).Value
+			}
+			fmt.Println("After this get the prevValue of node ", kv.me, " becomes ", kv.prevValue)
+			//fmt.Println("Node ", kv.me,  " get seq ", seq, " Key ", args.Key, " Value ", reply.Value)
+		//}
+	} else {
+		reply.Value = ""
+		kv.prevValues[args.Key]= ""
 	}
-	fmt.Println("Node ", kv.me)
-	kv.px.DumpValue()
-	kv.dumpSeqMap()
-	fmt.Println()
+	
+    //fmt.Println(kv.me)
+	//kv.px.DumpValue()
+	//kv.dumpSeqMap()
+	//fmt.Println()
 	
   	return nil
 }
@@ -140,24 +152,53 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
 			kv.px.Start(seq, op)
 			kv.wait(seq)
 		} else {
-			check := value.(Op).OpId
-			if check == op.OpId {
+			check := value.(Op)
+			if check.OpId == op.OpId {
+				key := check.Key
+				kv.seqMap[key] = seq
 				break
 			} else {
-				op = value.(Op)
-				key := op.Key
-				kv.seqMap[key] = seq
-				seq++
+				if check.OperType == PUT_ID {
+					key := check.Key
+					kv.seqMap[key] = seq
+					kv.prevValues[key] = check.Value
+				}
 			}
+			seq++
 		}		
 	}
 	
-	fmt.Println("Node ", kv.me,  " put seq ", seq, " Key ", args.Key, " value ", args.Value)
-
+	// to here we updated all the missing prevValues except the added one
+    // could kv.prevValues[args.Key] not exist? Yes!!!! the initial one is ""
+	// The reason is because prevValue only store the previous value. For the newest filled value, the slot should not
+	// be filled right away. The old value must be stored somewhere and return to reply as prevValue. Then update can 
+	// be processed. 
+	// if exist then update prevValues and pass to reply if not exist add to map and return prevValue is ""
+	
+	// Test has a very strange case, putHash value is 0 and the return value is still 0. It is impossible since your
+	// Server state starts from empty. The cause is because of the unstable network. The same putHash is called
+	// multiple times.
+	
+	
+	
+	var prevValue string
+	_, exist := kv.prevValues[args.Key]
+	if exist {
+		prevValue = kv.prevValues[args.Key]
+		if prevValue != op.Value {
+			kv.prevValues[args.Key] = op.Value
+		}
+		
+	} else {
+		prevValue = ""
+		kv.prevValues[args.Key] = op.Value
+	}
+	
 	if doHash {
-		reply.PreviousValue = kv.prevOp.Value
-		kv.prevOp = op
-	}		
+		reply.PreviousValue = prevValue
+			fmt.Println("The put value is ", args.Value, " The return value is ", reply.PreviousValue)
+	}
+	//fmt.Println("Node ", kv.me,  " put seq ", seq - 1, " Key ", args.Key, " value ", args.Value)
   	return nil
 }
 
@@ -173,8 +214,6 @@ A value decided is decided
 we want those decided and to be decided values
 */
 func (kv *KVPaxos) updateMap() {
-	//kv.mu.Lock()
-	//defer kv.mu.Unlock()
 	max := kv.px.Max()
 	for seq := kv.curSeq + 1; seq <= max; seq++ {
 		decided, value := kv.px.Status(seq)
@@ -217,8 +256,9 @@ func (kv *KVPaxos) updateMap() {
 
 
 func (kv *KVPaxos) dumpSeqMap() {
+	fmt.Print("Node ", kv.me)
 	for key, seq := range kv.seqMap {
-		fmt.Print("Seq ", seq, " Key ", key, "# ")
+		fmt.Print(" ( Seq ", seq, " Key ", key, " ) ")
 	}
 }
 
@@ -312,9 +352,11 @@ func StartServer(servers []string, me int) *KVPaxos {
   // Your initialization code here.
   kv.curSeq = EMPTY_NUMBER
   kv.seqMap = make(map[string]int)
-  kv.prevOp = Op{}
+  kv.prevValue = ""
   kv.operId = EMPTY_NUMBER
   kv.forgetList = make(map[int]bool)
+  kv.prevValues = make(map[string]string) 
+
 
 
   rpcs := rpc.NewServer()
