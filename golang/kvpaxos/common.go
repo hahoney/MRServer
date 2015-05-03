@@ -1,7 +1,7 @@
 package kvpaxos
 
 import "hash/fnv"
-import "strconv"
+//import "strconv"
 
 const (
   OK = "OK"
@@ -43,6 +43,7 @@ func hash(s string) uint32 {
 }
 
 func CalcHash(hprev string, val string) string {
-	h := hash(hprev + val)
-	return strconv.Itoa(int(h))
+	//h := hash(hprev + val)
+	//return strconv.Itoa(int(h))
+	return val
 }

@@ -36,8 +36,9 @@ func cleanup(kva []*KVPaxos) {
 }
 
 func NextValue(hprev string, val string) string {
-  h := hash(hprev + val)
-  return strconv.Itoa(int(h))
+  //h := hash(hprev + val)
+  //return strconv.Itoa(int(h))
+  return val
 }
 
 func testBasic(t *testing.T) {
@@ -379,21 +380,18 @@ func TestUnreliable(t *testing.T) {
           j := rand.Intn(i+1)
           sa[i], sa[j] = sa[j], sa[i]
         }
-		fmt.Println("Iter ", iters)
         myck := MakeClerk(sa)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
         ov := myck.PutHash(key, "0")
-		fmt.Println("The Key is ", key)
+
         if ov != pv {
-		  //fmt.Println("step 1 pv is ", pv, " ov is ", ov)
           t.Fatalf("wrong value; expected %s but123 got %s", pv, ov)
         }
-		return
         ov = myck.PutHash(key, "1")
         pv = NextValue(pv, "0")
         if ov != pv {
-		  //fmt.Println("step 2 pv is ", pv, " ov is ", ov)
+			fmt.Println("################Key is ", key)
           t.Fatalf("wrong value; expected %s but234 got %s", pv, ov)
         }
         ov = myck.PutHash(key, "2")

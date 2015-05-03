@@ -1,9 +1,3 @@
-/* Keep Notes while working on the code
-   1 seqMap could expire, update the seqMap before Put and Get. 
-   Failed first time: seq has duplicate keys
-
-*/
-
 package kvpaxos
 
 import "net"
@@ -63,8 +57,6 @@ type KVPaxos struct {
 	forgetList map[int] bool // seq to forget
 	curSeq	int // Highest seq number, remember that seq in px all continuous
 	// all seq less than curSeq are reachable
-	prevValue	string
-	operId	int
 }
 
 /* Ok, I finally got it. Paxos learning procedure:
@@ -77,16 +69,18 @@ we get, keep it and move to the next seq
 Where to stop? The seq at which the sent op and recv op are exactly the same
 */
 
+/* How the hashPut works does it hash the previous hashed value with the current
+unhashed one or both are unhashed? What if the previous hash is empty? Guess Guess guess!!!!
+*/
 
 func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
   // How do we know whether other minority nodes are learning ?
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.updateMap()
-	
 	op := kv.makeOp(args.Key, "", false, GET_ID, args.OpId)
 	seq := kv.curSeq + 1
+	
 	for {
 		decided, value := kv.px.Status(seq)
 		
@@ -99,106 +93,73 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 				break
 			} else {
 				if check.OperType == PUT_ID {
-					key := check.Key
-					kv.seqMap[key] = seq
-					kv.prevValues[key] = check.Value
+					kv.updateMap(check, seq)
+					kv.updatePrevMap(check)
 				}
 				seq++
 			}
 		}
 	}
-
-	key := args.Key
-	seq, exist := kv.seqMap[key]
-	
+	seq, exist := kv.seqMap[args.Key]
 	if exist {
 		_, value := kv.px.Status(seq)
-		//if decided {
-			reply.Value = value.(Op).Value
-			//kv.prevValue = value.(Op).Value
-			if kv.prevValues[args.Key] != value.(Op).Value {
-				kv.prevValues[args.Key] = value.(Op).Value
-			}
-			fmt.Println("After this get the prevValue of node ", kv.me, " becomes ", kv.prevValue)
-			//fmt.Println("Node ", kv.me,  " get seq ", seq, " Key ", args.Key, " Value ", reply.Value)
-		//}
-	} else {
-		reply.Value = ""
-		kv.prevValues[args.Key]= ""
+		kv.updatePrevMap(value.(Op))
 	}
-	
-    //fmt.Println(kv.me)
-	//kv.px.DumpValue()
-	//kv.dumpSeqMap()
-	//fmt.Println()
+	reply.Value = kv.curValues[args.Key]
 	
   	return nil
+}
+
+func (kv *KVPaxos) updatePrevMap(value Op) {
+	key := value.Key
+	if _, exist := kv.curValues[key]; !exist {
+		kv.curValues[key] = ""
+	}
+	if _, exist := kv.prevValues[key]; !exist {
+		kv.prevValues[key] = ""
+	}
+	
+	if kv.curValues[key] != value.Value {
+		kv.prevValues[key] = kv.curValues[key]
+		if value.Dohash {
+			kv.curValues[key] = CalcHash(kv.prevValues[key], value.Value)
+		} else {
+			kv.curValues[key] = value.Value
+		}
+	}
 }
 
 func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	kv.updateMap() // Might miss some seq between two Put Ops
 	op := kv.makeOp(args.Key, args.Value, args.DoHash, PUT_ID, args.OpId)
 	doHash := args.DoHash
  	seq := kv.curSeq + 1
 	
-	// Update the seq to keep consistency
 	for {
 		decided, value := kv.px.Status(seq)
-		
 		if !decided {
 			kv.px.Start(seq, op)
 			kv.wait(seq)
 		} else {
 			check := value.(Op)
 			if check.OpId == op.OpId {
-				key := check.Key
-				kv.seqMap[key] = seq
+				kv.updateMap(check, seq)
+				kv.updatePrevMap(check)
 				break
 			} else {
 				if check.OperType == PUT_ID {
-					key := check.Key
-					kv.seqMap[key] = seq
-					kv.prevValues[key] = check.Value
+					kv.updateMap(check, seq)
+					kv.updatePrevMap(check)
 				}
 			}
 			seq++
 		}		
 	}
-	
-	// to here we updated all the missing prevValues except the added one
-    // could kv.prevValues[args.Key] not exist? Yes!!!! the initial one is ""
-	// The reason is because prevValue only store the previous value. For the newest filled value, the slot should not
-	// be filled right away. The old value must be stored somewhere and return to reply as prevValue. Then update can 
-	// be processed. 
-	// if exist then update prevValues and pass to reply if not exist add to map and return prevValue is ""
-	
-	// Test has a very strange case, putHash value is 0 and the return value is still 0. It is impossible since your
-	// Server state starts from empty. The cause is because of the unstable network. The same putHash is called
-	// multiple times.
-	
-	
-	
-	var prevValue string
-	_, exist := kv.prevValues[args.Key]
-	if exist {
-		prevValue = kv.prevValues[args.Key]
-		if prevValue != op.Value {
-			kv.prevValues[args.Key] = op.Value
-		}
-		
-	} else {
-		prevValue = ""
-		kv.prevValues[args.Key] = op.Value
-	}
-	
 	if doHash {
-		reply.PreviousValue = prevValue
-			fmt.Println("The put value is ", args.Value, " The return value is ", reply.PreviousValue)
+		reply.PreviousValue = kv.prevValues[args.Key]
 	}
-	//fmt.Println("Node ", kv.me,  " put seq ", seq - 1, " Key ", args.Key, " value ", args.Value)
   	return nil
 }
 
@@ -206,13 +167,30 @@ func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int, 
 	return Op{Key: key, Value: value, Dohash: doHash, OperType: operTyped, OpId: opId}
 }
 
-/* Can I take the undecided value. What is the meaning
-of decided. Is it processing? or empty forever?
-A value undecided and empty is unaccepted
-A value undecided but not empty is accepted
-A value decided is decided
-we want those decided and to be decided values
-*/
+
+func (kv *KVPaxos) updateMap(op Op, seq int) {
+	// different seq may have same op
+	previous, exist := kv.curValues[op.Key]
+	if !exist {
+		previous = ""
+	}
+	kv.prevValues[op.Key] = previous
+	kv.seqMap[op.Key] = seq
+	
+	if op.OperType == PUT_ID {
+		if op.Dohash {
+			kv.curValues[op.Key] = CalcHash(previous, op.Value)
+		} else {
+			kv.curValues[op.Key] = op.Value
+		}
+	}
+	kv.curSeq++
+	kv.px.Done(kv.curSeq)
+}
+
+
+
+/*
 func (kv *KVPaxos) updateMap() {
 	max := kv.px.Max()
 	for seq := kv.curSeq + 1; seq <= max; seq++ {
@@ -253,7 +231,7 @@ func (kv *KVPaxos) updateMap() {
 	kv.px.Done(minSeq - 1) 
 	kv.curSeq = max
 }
-
+*/
 
 func (kv *KVPaxos) dumpSeqMap() {
 	fmt.Print("Node ", kv.me)
@@ -262,54 +240,6 @@ func (kv *KVPaxos) dumpSeqMap() {
 	}
 }
 
-
-/* Update seqMap and th curSeq pt to max. max is the highest
-   agreed seq by all majority nodes. Or if undecided value exists
-   return the lowest seq below which all seq have been agreed 
-   update a seq 1 2 3 4 5 6 7 8 
-   from 3 to 8 is not seen by a node yet. Update map
-   the curSeq is at 2
-   begin scan 3 if its key is same as one in the map, overwrite and save
-   the overwritten seq to the garbage list. if new, insert to the map
-   after the scan curSeq is at 8
-   1 could some seq be empty ? How to do with it
-   2 how to determine the garbage list
-   all new incoming seq must be larger than max
-*/ 
-/*
-func (kv *KVPaxos) UpdateMap(isPut bool) {
-	max := kv.px.Max()
-	forgetList := make(map[int]bool)
-	result := max
-	for seq := kv.curSeq + 1; seq <= max; seq++{
-		decided, value := kv.px.Status(seq)
-		if decided {
-			_, ok := kv.seqMap[value.(Op).Key]
-			if ok {  // is already in map then overwrite should be recorded
-				forgetList[seq] = true
-			}
-			kv.seqMap[value.(Op).Key] = seq
-		} else { // seq is not decided
-			if value == nil  && isPut { // not accepted
-				//result = seq - 1
-				//break
-			} else { // accepted by this node
-				kv.seqMap[value.(Op).Key] = seq
-			}
-		}
-	}
-	minSeq := kv.px.Min()
-	for {
-		if _, ok := forgetList[minSeq]; ok {
-			minSeq++
-		} else {
-			break
-		}
-	}
-	kv.px.Done(minSeq)
-	kv.curSeq = result
-}
-*/
 
 func (kv *KVPaxos) wait(seq int) Op {
 	to := 10 * time.Millisecond
@@ -352,12 +282,9 @@ func StartServer(servers []string, me int) *KVPaxos {
   // Your initialization code here.
   kv.curSeq = EMPTY_NUMBER
   kv.seqMap = make(map[string]int)
-  kv.prevValue = ""
-  kv.operId = EMPTY_NUMBER
   kv.forgetList = make(map[int]bool)
   kv.prevValues = make(map[string]string) 
-
-
+  kv.curValues = make(map[string]string)
 
   rpcs := rpc.NewServer()
   rpcs.Register(kv)
