@@ -2,12 +2,13 @@ package kvpaxos
 
 import "net/rpc"
 import "fmt"
-import "crypto/rand"
-import "math/big"
+import "strconv"
+import "time"
 
 type Clerk struct {
   servers []string
   // You will have to modify this struct.
+  me string
 }
 
 
@@ -15,6 +16,7 @@ func MakeClerk(servers []string) *Clerk {
   ck := new(Clerk)
   ck.servers = servers
   // You'll have to add code here.
+  ck.me = strconv.FormatInt(nrand(), 10)
   return ck
 }
 
@@ -59,7 +61,7 @@ func call(srv string, rpcname string,
 func (ck *Clerk) Get(key string) string {
   // You will have to modify this function.
 	server := 0 //rand.Intn(len(ck.servers))
-	args := &GetArgs{Key: key, OpId: nrand()}
+	args := &GetArgs{Key: key, OpId: ck.GeneratePaxosNumber(), Client: ck.me}
 	reply := &GetReply{}
 	for {
 	    ok := call(ck.servers[server], "KVPaxos.Get", args, reply)
@@ -67,6 +69,8 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
+		time.Sleep(time.Second * 1)
+		//time.Sleep(100 * time.Millisecond)
 	}
 	return reply.Value
 }
@@ -79,7 +83,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
   // You will have to modify this function.
 // Your put is completed only when the instance is decided on the machine
 	server := 0 //rand.Intn(len(ck.servers))
-	args := &PutArgs{Key: key, Value: value, DoHash: dohash, OpId: nrand()}
+	args := &PutArgs{Key: key, Value: value, DoHash: dohash, OpId: ck.GeneratePaxosNumber(), Client: ck.me}
 	reply := &PutReply{}
 	for {
 		ok := call(ck.servers[server], "KVPaxos.Put", args, reply)
@@ -87,6 +91,8 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
+		time.Sleep(time.Second * 1)
+		//time.Sleep(100 * time.Millisecond)
 	}
 	if dohash {
 		return reply.PreviousValue
@@ -97,14 +103,16 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 func (ck *Clerk) Put(key string, value string) {
   ck.PutExt(key, value, false)
 }
+
 func (ck *Clerk) PutHash(key string, value string) string {
   v := ck.PutExt(key, value, true)
   return v
 }
 
-func nrand() int64 {
-	max := big.NewInt(int64(int64(1) << 62))
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
+
+func (ck *Clerk) GeneratePaxosNumber() int64 {
+	begin := time.Date(2014, time.May, 5, 1, 0, 0, 0, time.UTC)
+	duration := time.Now().Sub(begin)
+	return duration.Nanoseconds()
+	//return strconv.FormatInt(duration.Nanoseconds(), 10) + ck.me
 }

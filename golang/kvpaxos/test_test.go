@@ -36,9 +36,8 @@ func cleanup(kva []*KVPaxos) {
 }
 
 func NextValue(hprev string, val string) string {
-  //h := hash(hprev + val)
-  //return strconv.Itoa(int(h))
-  return val
+  h := hash(hprev + val)
+  return strconv.Itoa(int(h))
 }
 
 func testBasic(t *testing.T) {
@@ -365,8 +364,15 @@ func TestUnreliable(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 
   fmt.Printf("Test: Sequence of puts, unreliable ...\n")
+/*
+5 clients send requests to server there is not time sequence of 
+puthash request. the time sequence has meaning on the client side 
+but is meaningless on the server side. The sequence depends on 
+when two requests from clients arrive. So it is a bad idea to
+use seq as index for oustanding previous value 
+*/
 
-  for iters := 0; iters < 6; iters++ {
+  for iters := 0; iters < 60; iters++ {
   const ncli = 5
     var ca [ncli]chan bool
     for cli := 0; cli < ncli; cli++ {
@@ -383,6 +389,7 @@ func TestUnreliable(t *testing.T) {
         myck := MakeClerk(sa)
         key := strconv.Itoa(me)
         pv := myck.Get(key)
+		
         ov := myck.PutHash(key, "0")
 
         if ov != pv {
@@ -391,7 +398,6 @@ func TestUnreliable(t *testing.T) {
         ov = myck.PutHash(key, "1")
         pv = NextValue(pv, "0")
         if ov != pv {
-			fmt.Println("################Key is ", key)
           t.Fatalf("wrong value; expected %s but234 got %s", pv, ov)
         }
         ov = myck.PutHash(key, "2")
@@ -407,9 +413,10 @@ func TestUnreliable(t *testing.T) {
         if myck.Get(key) != nv {
           t.Fatalf("wrong value")
         }
-        ok = true
+        ok = true 
       }(cli)
     }
+	
     for cli := 0; cli < ncli; cli++ {
       x := <- ca[cli]
       if x == false {
