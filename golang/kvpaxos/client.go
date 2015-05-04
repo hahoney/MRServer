@@ -69,8 +69,8 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
-		time.Sleep(time.Second * 1)
-		//time.Sleep(100 * time.Millisecond)
+		//time.Sleep(time.Second * 1)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return reply.Value
 }
@@ -91,8 +91,8 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
-		time.Sleep(time.Second * 1)
-		//time.Sleep(100 * time.Millisecond)
+		//time.Sleep(time.Second * 1)
+		time.Sleep(100 * time.Millisecond)
 	}
 	if dohash {
 		return reply.PreviousValue

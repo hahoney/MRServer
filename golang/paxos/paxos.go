@@ -61,7 +61,7 @@ type PaxosArgs struct {
 	Seq		int
 	NPrep	int
 	VPrep	interface{}
-	// for Done only
+	// for passing Done only
 	Done	int
 	Me		int
 }
@@ -127,6 +127,12 @@ func (px *Paxos) Start(seq int, v interface{}) {
 	go func() {
 		px.doPropose(seq, v)
 	}()
+}
+
+func (px *Paxos) DumpValue() {
+	for _, inst := range px.instances {
+		fmt.Print("Seq ", inst.seq, ": ", inst.vAgree, " ")
+	}
 }
 
 
@@ -232,9 +238,8 @@ func (px *Paxos) ProcAccept(args *PaxosArgs, reply *PaxosReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 	seq := args.Seq
-	_, ok := px.instances[args.Seq]
 	reply.Accept = REJECT
-	if !ok {
+	if 	_, exist := px.instances[args.Seq]; !exist {
 		px.instances[seq] = makeInst(seq, EMPTY_NUMBER, nil)
 	}
 	if args.NPrep >= px.instances[seq].nPrep {
@@ -253,7 +258,8 @@ func (px *Paxos) sendDecidedToAll(agree *PaxosInst) {
 }
 
 // the min done inst information about this server on other servers 
-// should be updated
+// should be updated when decided. It helps Min() function
+// 
 func (px *Paxos) sendDecided(peer string, agree *PaxosInst) {
 	done := px.doneSeqs[px.me]
 	args := &PaxosArgs{Seq: agree.seq, NPrep: agree.nPrep, VPrep: agree.vAgree, Done: done, Me: px.me}
@@ -269,6 +275,9 @@ func (px *Paxos) ProcDecided(args *PaxosArgs, reply *PaxosReply) error {
 	px.mu.Lock()
 	defer px.mu.Unlock()
 	seq := args.Seq
+	if _, exist := px.instances[seq]; !exist {
+		px.instances[seq] = makeInst(seq, EMPTY_NUMBER, nil)
+	}
 	px.instances[seq].vAgree = args.VPrep
 	px.instances[seq].decided = true
 	px.doneSeqs[args.Me] = args.Done
@@ -286,9 +295,8 @@ func (px *Paxos) isMajority(count int) bool {
 // see the comments for Min() for more explanation.
 //
 func (px *Paxos) Done(seq int) {
-	// Your code here.
-	px.mu.Lock()
-	defer px.mu.Unlock()	
+	//px.mu.Lock()
+	//defer px.mu.Unlock()	
 	if px.doneSeqs[px.me] < seq {
 		px.doneSeqs[px.me] = seq
 	}
@@ -299,8 +307,8 @@ func (px *Paxos) Done(seq int) {
 // highest instance sequence known to
 // this peer.
 //
-func (px *Paxos) Max() int {.
-	max := EMPTY_NUMBER
+func (px *Paxos) Max() int {
+	max := 0
 	for m, _ := range px.instances {
 		if m > max {
 			max = m
@@ -346,9 +354,10 @@ func (px *Paxos) Min() int {
 			min = i
 		}
 	}
-	for i, _ := range px.instances {
-		if i <= min && px.instances[i].decided {
-			delete(px.instances, i)
+	
+	for k, _ := range px.instances {
+		if k < min && px.instances[k].decided {
+			delete(px.instances, k)
 		}
 	}
 	return min + 1
@@ -362,7 +371,11 @@ func (px *Paxos) Min() int {
 // it should not contact other Paxos peers.
 //
 func (px *Paxos) Status(seq int) (bool, interface{}) {
-	// Your code here.
+	// Your code here.	
+	min := px.Min()
+	if seq < min {
+		return false, nil
+	}
 	px.mu.Lock()
 	defer px.mu.Unlock()
 	inst, ok := px.instances[seq]

@@ -57,5 +57,5 @@ func CalcHash(hprev string, val string) string {
 	//fmt.Println("In calcHash hprev is ", hprev, " val is ", val )
 	h := hash(hprev + val)
 	return strconv.Itoa(int(h))
-	//return hprev
+	//return val
 }

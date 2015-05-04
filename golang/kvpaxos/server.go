@@ -110,9 +110,6 @@ func (kv *KVPaxos) reachPaxosAgreement(op Op) string {
 	return kv.prevValues[op.Client]
 }
 
-// 一个Op进来怎么处理? 1 首先要看看是否以前已经处理过, 如果处理过就不更新返回
-// 2 然后看看是不是Put型的Op,如果是的话就要更新数据结构
-// 3 看看是不是dohash, 如果是的话计算hash 否则直接保存
 func (kv *KVPaxos) updateMap(op Op) {
 		
 	previous, exist := kv.curValues[op.Key]

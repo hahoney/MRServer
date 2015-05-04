@@ -38,9 +38,10 @@ func cleanup(kva []*KVPaxos) {
 func NextValue(hprev string, val string) string {
   h := hash(hprev + val)
   return strconv.Itoa(int(h))
+//return val
 }
 
-func testBasic(t *testing.T) {
+func TestBasic(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -115,7 +116,7 @@ func testBasic(t *testing.T) {
   time.Sleep(1 * time.Second)
 }
 
-func testDone(t *testing.T) {
+func TestDone(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -225,7 +226,7 @@ func part(t *testing.T, tag string, npaxos int, p1 []int, p2 []int, p3 []int) {
   }
 }
 
-func testPartition(t *testing.T) {
+func TestPartition(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   tag := "partition"
@@ -468,7 +469,7 @@ use seq as index for oustanding previous value
   time.Sleep(1 * time.Second)
 }
 
-func testHole(t *testing.T) {
+func TestHole(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   fmt.Printf("Test: Tolerates holes in paxos sequence ...\n")
