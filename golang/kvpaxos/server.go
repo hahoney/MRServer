@@ -42,6 +42,7 @@ type Op struct {
 	OperType	int
 	OpId		int64
 	Client		string
+	PrevValue	string
 }
 
 type KVPaxos struct {
@@ -68,6 +69,9 @@ func (kv *KVPaxos) Get(args *GetArgs, reply *GetReply) error {
 	defer kv.mu.Unlock()
 	op := kv.makeOp(args.Key, "", false, GET_ID, args.OpId, args.Client)
 	reply.Value = kv.reachPaxosAgreement(op)
+	
+	//fmt.Println("Server ", kv.me, " receive GET from Client ", args.Client, " with key ", args.Key)
+	//fmt.Println("Server ", kv.me, " response GET to Client ", args.Client, " with (key: ", args.Key, " value: ", reply.Value, ")")
 
   	return nil
 }
@@ -79,6 +83,12 @@ func (kv *KVPaxos) Put(args *PutArgs, reply *PutReply) error {
 	
 	op := kv.makeOp(args.Key, args.Value, args.DoHash, PUT_ID, args.OpId, args.Client)
 	reply.PreviousValue = kv.reachPaxosAgreement(op)
+	
+	//fmt.Println("Server ", kv.me, " receive PUT from Client ", args.Client, " with (key: ", args.Key, " value: ", args.Value, ")")
+	
+	if args.DoHash {
+		//fmt.Println("Server ", kv.me, " reply PUT to Client ", args.Client, " with previous key: ", reply.PreviousValue)
+	}
 		
   	return nil
 }
@@ -91,8 +101,8 @@ func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int, 
 func (kv *KVPaxos) reachPaxosAgreement(op Op) string {
 	var ok = false
 	for !ok {
-		uuid, exists := kv.seen[op.Client]
-		if exists && uuid == op.OpId {
+		opId, exists := kv.seen[op.Client]
+		if exists && opId >= op.OpId {
 			return kv.prevValues[op.Client]
 		}	
 		seq := kv.curSeq + 1		
@@ -101,7 +111,11 @@ func (kv *KVPaxos) reachPaxosAgreement(op Op) string {
 		if decided {
 			res = value.(Op)
 		} else {
-			kv.px.Start(seq, op)
+			if value == nil {
+				kv.px.Start(seq, op)
+			} else {
+				kv.px.Start(seq, value.(Op))
+			}
 			res = kv.wait(seq)
 		}
 		ok = res.OpId == op.OpId

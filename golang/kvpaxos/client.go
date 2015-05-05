@@ -1,7 +1,7 @@
 package kvpaxos
 
 import "net/rpc"
-import "fmt"
+//import "fmt"
 import "strconv"
 import "time"
 
@@ -49,7 +49,7 @@ func call(srv string, rpcname string,
     return true
   }
 
-  fmt.Println(err)
+  //fmt.Println(err)
   return false
 }
 
@@ -70,7 +70,7 @@ func (ck *Clerk) Get(key string) string {
 		}
 		server = (server + 1) % len(ck.servers)
 		//time.Sleep(time.Second * 1)
-		time.Sleep(100 * time.Millisecond)
+		//time.Sleep(100 * time.Millisecond)
 	}
 	return reply.Value
 }
@@ -92,7 +92,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 		}
 		server = (server + 1) % len(ck.servers)
 		//time.Sleep(time.Second * 1)
-		time.Sleep(100 * time.Millisecond)
+		//time.Sleep(100 * time.Millisecond)
 	}
 	if dohash {
 		return reply.PreviousValue

@@ -41,7 +41,7 @@ func NextValue(hprev string, val string) string {
 //return val
 }
 
-func TestBasic(t *testing.T) {
+func testBasic(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -116,7 +116,7 @@ func TestBasic(t *testing.T) {
   time.Sleep(1 * time.Second)
 }
 
-func TestDone(t *testing.T) {
+func testDone(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -226,7 +226,7 @@ func part(t *testing.T, tag string, npaxos int, p1 []int, p2 []int, p3 []int) {
   }
 }
 
-func TestPartition(t *testing.T) {
+func testPartition(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   tag := "partition"
@@ -560,7 +560,7 @@ func TestHole(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func testManyPartition(t *testing.T) {
+func TestManyPartition(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   fmt.Printf("Test: Many clients, changing partitions ...\n")
