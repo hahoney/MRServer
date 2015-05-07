@@ -54,10 +54,10 @@ type KVPaxos struct {
   px *paxos.Paxos
 
   // Your definitions here.
-	seen	map[string] int64 // Unique request ID from client
-	prevValues map[string] string // client name as key and value as value
-	curValues  map[string] string
-	curSeq	int // Highest seq number, remember that seq in px all continuous
+	seen	map[string] int64 // Highest unique request ID from client
+	prevValues map[string] string // previous value for each client
+	curValues  map[string] string // kv store
+	curSeq	int // Highest seq number processed
 	// all seq less than curSeq are reachable
 }
 
@@ -97,29 +97,35 @@ func (kv *KVPaxos) makeOp(key string, value string, doHash bool, operTyped int, 
 	return Op{Key: key, Value: value, Dohash: doHash, OperType: operTyped, OpId: opId, Client: client}
 }
 
-
 func (kv *KVPaxos) reachPaxosAgreement(op Op) string {
-	var ok = false
-	for !ok {
-		opId, exists := kv.seen[op.Client]
-		if exists && opId >= op.OpId {
-			return kv.prevValues[op.Client]
-		}	
+	
+	opId, exists := kv.seen[op.Client]
+	// Here is the trick ">=". "==" means the servers received a resend
+	// from the clients. How could ">" happen ? It means the resend Op (which is
+	// sent earlier) is late in paxos agreement. For example, Op1 is sent at moment A
+	// and is resend due to network failure. Op2 is sent right after Op1 (moment B) but is processed
+	// without retry. There is a small chance that Op2 reaches paxo agreement earlier than Op1 does.
+	// The eventual agreed data store will have both Op1 and Op2. But the paxos sequence will certainly
+	// differ. The solution is we simply return the previous value saved on local server without updating the map.
+	// ">" solves the many partition test and some errors in unreliable test.
+	if exists && opId >= op.OpId {
+		return kv.prevValues[op.Client]
+	}
+		
+	for {
 		seq := kv.curSeq + 1		
 		decided, value := kv.px.Status(seq)
-		var res Op
+		var result Op
 		if decided {
-			res = value.(Op)
+			result = value.(Op)
 		} else {
-			if value == nil {
-				kv.px.Start(seq, op)
-			} else {
-				kv.px.Start(seq, value.(Op))
-			}
-			res = kv.wait(seq)
+			kv.px.Start(seq, op)
+			result = kv.wait(seq)
 		}
-		ok = res.OpId == op.OpId
-		kv.updateMap(res)
+		kv.updateMap(result)
+		if result.OpId == op.OpId {
+			break
+		}
 	}
 	return kv.prevValues[op.Client]
 }

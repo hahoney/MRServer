@@ -69,8 +69,6 @@ func (ck *Clerk) Get(key string) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
-		//time.Sleep(time.Second * 1)
-		//time.Sleep(100 * time.Millisecond)
 	}
 	return reply.Value
 }
@@ -91,8 +89,6 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
 			break
 		}
 		server = (server + 1) % len(ck.servers)
-		//time.Sleep(time.Second * 1)
-		//time.Sleep(100 * time.Millisecond)
 	}
 	if dohash {
 		return reply.PreviousValue
@@ -111,8 +107,7 @@ func (ck *Clerk) PutHash(key string, value string) string {
 
 
 func (ck *Clerk) GeneratePaxosNumber() int64 {
-	begin := time.Date(2014, time.May, 5, 1, 0, 0, 0, time.UTC)
+	begin := time.Date(2015, time.May, 5, 1, 0, 0, 0, time.UTC)
 	duration := time.Now().Sub(begin)
 	return duration.Nanoseconds()
-	//return strconv.FormatInt(duration.Nanoseconds(), 10) + ck.me
 }

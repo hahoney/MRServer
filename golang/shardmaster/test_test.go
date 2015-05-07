@@ -283,7 +283,7 @@ func TestBasic(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func TestUnreliable(t *testing.T) {
+func testUnreliable(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -334,7 +334,7 @@ func TestUnreliable(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func TestFreshQuery(t *testing.T) {
+func testFreshQuery(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
