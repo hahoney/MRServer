@@ -22,9 +22,12 @@ package shardmaster
 
 const NShards = 10
 
+// do shard's gid and Group's gid index have oneone correspondence?
+// what if groups are more than shards?
+// different shards can have same gid!!
 type Config struct {
   Num int // config number
-  Shards [NShards]int64 // gid  10 GID max
+  Shards [NShards]int64
   Groups map[int64][]string // gid -> servers[]
 }
 

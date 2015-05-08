@@ -105,9 +105,11 @@ func TestBasic(t *testing.T) {
 
   var gid1 int64 = 1
   ck.Join(gid1, []string{"x", "y", "z"})
+
   check(t, []int64{gid1}, ck)
   cfa[1] = ck.Query(-1)
 
+return
   var gid2 int64 = 2
   ck.Join(gid2, []string{"a", "b", "c"})
   check(t, []int64{gid1,gid2}, ck)
