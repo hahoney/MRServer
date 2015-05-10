@@ -36,6 +36,7 @@ const (
 	
 )
 
+const debug = 0
 
 type Op struct {
   // Your data here.
@@ -53,12 +54,17 @@ func (sm *ShardMaster) dumpConfigs() {
 	}
 }
 
+func (sm *ShardMaster) printOpBrief(op Op) {
+	if debug == 1 {
+		fmt.Println(" Op GID ", op.GID, " Op Type ", op.OpType)
+	}
+}
+
 
 // reach paxos agreement on configs
 func (sm *ShardMaster) reachPaxosAgreement(op Op) Config {
-	min := sm.curOp
+	min := sm.curOp + 1
 	max := sm.px.Max()
-	//fmt.Println("Min and Max ", min, " ", max)
 	var config Config
 	for i := min; i <= max; i++ {	
 		decided, value := sm.px.Status(i)
@@ -69,11 +75,13 @@ func (sm *ShardMaster) reachPaxosAgreement(op Op) Config {
 			sm.px.Start(i, op)
 			result = sm.wait(i)
 		}
-		config = sm.updateMap(result, i)
+		sm.updateMap(result, i)
 	}
-	sm.px.Start(max + 1, op)
-	sm.wait(max + 1)
-	sm.updateMap(op, max + 1)
+	if op.OpType != OPERATION_QUERY {
+		sm.px.Start(max + 1, op)
+		sm.wait(max + 1)
+	}
+	config = sm.updateMap(op, max + 1)
 	return config
 }
 
@@ -83,27 +91,32 @@ func (sm *ShardMaster) updateMap(op Op, configNum int) Config {
 	var config Config
 	var ok bool
 	if op.OpType == OPERATION_JOIN {
+		sm.printOpBrief(op)
 		config, ok = sm.makeJoin(op, configNum)
 	}
 	if op.OpType == OPERATION_LEAVE {
+		sm.printOpBrief(op)
 		config, ok = sm.makeLeave(op, configNum)
 	}
 	if op.OpType == OPERATION_MOVE {
+		sm.printOpBrief(op)
 		config, ok = sm.makeMove(op, configNum)
 	}
 	if op.OpType == OPERATION_QUERY {
+		sm.printOpBrief(op)
 		config, ok = sm.doQuery(op.Num)
-		//if ok {
-			return config
-		//}
+		return config
 	}
 	if !ok {
-		fmt.Println("Error")
-	//	return Config{}
+	//	fmt.Println("Error")
+		return config
 	}
-	sm.configs = append(sm.configs, config)
-	sm.px.Done(configNum)
-	sm.curOp++
+	// Query does not progress the configs
+	if op.OpType != OPERATION_QUERY {
+		sm.configs = append(sm.configs, config)
+		sm.px.Done(configNum)
+		sm.curOp = configNum
+	}
 	return config
 }
 
@@ -111,12 +124,7 @@ func (sm *ShardMaster) updateMap(op Op, configNum int) Config {
 func (sm *ShardMaster) initNewConfig(configNum int) Config {
 	var lastConfig Config
 	configLength := len(sm.configs)
-		//fmt.Println(len(sm.configs), configNum)
-	if configNum == 0 {
-		lastConfig = Config{}
-	} else {
-		lastConfig = sm.configs[configLength - 1]
-	}
+	lastConfig = sm.configs[configLength - 1]
 	newConfig := Config{Num: configNum}
 	newConfig.Shards = [NShards]int64{}
 	newConfig.Groups = make(map[int64][]string)
@@ -132,16 +140,15 @@ func (sm *ShardMaster) initNewConfig(configNum int) Config {
 
 
 // The servers in a group do not change. Only the grouping is changed
-func (sm *ShardMaster) balanceShards(config Config, gid int64) Config {
+func (sm *ShardMaster) balanceJoin(config Config, gid int64) Config {
 	totalGroups := len(config.Groups)
 	average := NShards / totalGroups
 	remainder := NShards % totalGroups
 
 	// count shards for each group (GID)
 	shardDist, freeShards := sm.countShards(config)
-
 	// cut shards from above average groups
-	//balancer := make([]int, 0) // allocator is []int index -> shard number
+	// balancer := make([]int, 0) // allocator is []int index -> shard number
 	for gid, shardGroup := range shardDist {
 		var target int
 		if remainder > 0 {
@@ -153,13 +160,48 @@ func (sm *ShardMaster) balanceShards(config Config, gid int64) Config {
 		if len(shardGroup) > target {
 			freeShards = append(freeShards, shardGroup[target:]...)
 			shardDist[gid] = shardGroup[:target] // shardGroup is []int of shard Number
+			// shardDist is a map  gid -> a []int list of shard number\
+			// freeShard is a list []int of index -> shardNumber, index has no meaning 
 		}
-	}	
+	}
 	// move shards from balancer to new group
-	//fmt.Println("balancer length ", len(freeShards), " average ", average,  " totalGroups ", totalGroups)
+	// fmt.Println("balancer length ", len(freeShards), " average ", average,  " totalGroups ", totalGroups)
 	for _, shardNum := range freeShards {
 		config.Shards[shardNum] = gid
 	}
+	return config
+}
+
+func (sm *ShardMaster) balanceLeave(config Config, configNum int) Config {
+	totalGroups := len(config.Groups)
+	average := NShards / totalGroups
+	remainder := NShards % totalGroups
+	//fmt.Println("Enter Leave")
+	shardDist, freeShards := sm.countShards(config)
+	moved := 0
+	for gid, shardGroup := range shardDist {
+		var target int
+		if remainder > 0 {
+			target = average + 1
+			remainder--
+		} else {
+			target = average
+		} 
+		//fmt.Println("Leave ", shardDist, " ", target, " ", freeShards, " configNum ", configNum)
+		//sm.dumpConfigs()
+		if len(shardGroup) < target {
+			shardsToMove := target - len(shardGroup)
+			if shardsToMove > len(freeShards) - moved {
+				shardsToMove = len(freeShards) - moved
+			}
+			for i := moved; i  < moved + shardsToMove; i++ {
+				fmt.Println(i, " ", len(freeShards), " ", gid, " ", target, " ", shardsToMove, " ", moved)
+				config.Shards[freeShards[i]] = gid
+			}
+			moved += shardsToMove
+		}  
+	} 
+	//fmt.Println("Exit Leave ", len(config.Groups))
 	return config
 }
 
@@ -170,6 +212,7 @@ func (sm *ShardMaster) countShards(config Config) (map[int64][]int, []int) {
 		var shard []int
 		if gid == EMPTY_NUMBER {
 			freeShards = append(freeShards, index)
+			continue
 		}
 		_, exist := shardDist[gid]
 		if !exist {
@@ -182,6 +225,7 @@ func (sm *ShardMaster) countShards(config Config) (map[int64][]int, []int) {
 	}
 	return shardDist, freeShards
 }
+
 
 func (sm *ShardMaster) validateInput(config Config, gid int64, opType int) bool {
 	lengthGroups := len(config.Groups)
@@ -196,7 +240,11 @@ func (sm *ShardMaster) validateInput(config Config, gid int64, opType int) bool 
 	}
 	
 	if _, exist := config.Groups[gid]; exist && opType == OPERATION_JOIN {
-		fmt.Println("Group already exist")
+		fmt.Println("Group already exist, gid = ", gid)
+		return false
+	}
+	if _, exist := config.Groups[gid]; !exist && opType == OPERATION_LEAVE {
+		fmt.Println("Leave Id does not exist ", gid)
 		return false
 	}
 	return true
@@ -204,20 +252,20 @@ func (sm *ShardMaster) validateInput(config Config, gid int64, opType int) bool 
 
 
 func (sm *ShardMaster) makeJoin(op Op, configNum int) (Config, bool) {
-	fmt.Println("make join")
 	joinConfig := sm.initNewConfig(configNum)
 	ok := sm.validateInput(joinConfig, op.GID, op.OpType)
 	if !ok { 
 		return joinConfig, false
 	}
 	joinConfig.Groups[op.GID] = op.Servers
-	joinConfig = sm.balanceShards(joinConfig, op.GID)
+	joinConfig = sm.balanceJoin(joinConfig, op.GID)
 	return joinConfig, ok
 }
 
 
 func (sm *ShardMaster) makeLeave(op Op, configNum int) (Config, bool) {
 	leaveConfig := sm.initNewConfig(configNum)
+	fmt.Println("Config before leave ", leaveConfig, " and leave GID is ", op.GID)
 	ok := sm.validateInput(leaveConfig, op.GID, op.OpType)
 	if !ok {
 		return leaveConfig, false
@@ -228,9 +276,11 @@ func (sm *ShardMaster) makeLeave(op Op, configNum int) (Config, bool) {
 		}
 	}
 	delete(leaveConfig.Groups, op.GID)
-	sm.balanceShards(leaveConfig, op.GID)
+	leaveConfig = sm.balanceLeave(leaveConfig, configNum)
+	fmt.Println("Config after leave ", leaveConfig)
 	return leaveConfig, true
 }
+
 
 func (sm *ShardMaster) makeMove(op Op, configNum int) (Config, bool) {
 	moveConfig := sm.initNewConfig(configNum)
@@ -241,6 +291,7 @@ func (sm *ShardMaster) makeMove(op Op, configNum int) (Config, bool) {
 	moveConfig.Shards[op.Shard] = op.GID
 	return moveConfig, true
 }
+
 
 func (sm *ShardMaster) doQuery(configNum int) (Config, bool) {
 	maxConfig := sm.getMaxConfigIndex()
@@ -258,6 +309,7 @@ func (sm *ShardMaster) doQuery(configNum int) (Config, bool) {
 	return result, ok
 }
 
+
 func (sm *ShardMaster) getMaxConfigIndex() int {
 	max := -1
 	maxIndex := -1
@@ -269,8 +321,6 @@ func (sm *ShardMaster) getMaxConfigIndex() int {
 	}
 	return maxIndex
 }
-
-
 
 
 func (sm *ShardMaster) wait(config int) Op {
@@ -294,7 +344,6 @@ func (sm *ShardMaster) Join(args *JoinArgs, reply *JoinReply) error {
   defer sm.mu.Unlock()
   op := Op{OpType: OPERATION_JOIN, GID: args.GID, Servers: args.Servers}
   sm.reachPaxosAgreement(op)
-sm.dumpConfigs()
   return nil
 }
 
@@ -345,6 +394,11 @@ func StartServer(servers []string, me int) *ShardMaster {
   sm.me = me
 
   sm.configs = make([]Config, 1)
+
+  for i := 0; i < NShards; i++ {
+	sm.configs[0].Shards[i] = EMPTY_NUMBER 
+  }
+  //sm.curOp = EMPTY_NUMBER
   sm.configs[0].Groups = map[int64][]string{}
 
   rpcs := rpc.NewServer()
