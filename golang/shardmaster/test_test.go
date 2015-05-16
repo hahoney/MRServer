@@ -214,7 +214,7 @@ func TestBasic(t *testing.T) {
 
   fmt.Printf("Test: Concurrent leave/join ...\n")
 
-  const npara = 1
+  const npara = 3
   gids := make([]int64, npara)
   var ca [npara]chan bool
   for xi := 0; xi < npara; xi++ {
@@ -234,7 +234,7 @@ func TestBasic(t *testing.T) {
   check(t, gids, ck)
 
   fmt.Printf("  ... Passed\n")
-
+return
   fmt.Printf("Test: Min advances after joins ...\n")
 
   for i, sm := range(sma) {
@@ -244,7 +244,7 @@ func TestBasic(t *testing.T) {
   }
 
   fmt.Printf("  ... Passed\n")
-return
+
   fmt.Printf("Test: Minimal transfers after joins ...\n")
 
   c1 := ck.Query(-1)

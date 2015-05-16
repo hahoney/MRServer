@@ -65,6 +65,7 @@ func (sm *ShardMaster) printOpBrief(op Op) {
 func (sm *ShardMaster) reachPaxosAgreement(op Op) Config {
 	min := sm.curOp + 1
 	max := sm.px.Max()
+	fmt.Println("Node ", sm.me, " max is ", max)
 	var config Config
 	for i := min; i <= max; i++ {	
 		decided, value := sm.px.Status(i)
@@ -93,18 +94,34 @@ func (sm *ShardMaster) updateMap(op Op, configNum int) Config {
 	if op.OpType == OPERATION_JOIN {
 		sm.printOpBrief(op)
 		config, ok = sm.makeJoin(op, configNum)
+		if ok {
+			fmt.Println("Join ", config, " Op ", op.GID, " Node ", sm.me)
+		}
 	}
 	if op.OpType == OPERATION_LEAVE {
 		sm.printOpBrief(op)
 		config, ok = sm.makeLeave(op, configNum)
+		if ok {
+			fmt.Println("Leave ", config, " Op ", op.GID, " Node ", sm.me)
+		} else {
+			fmt.Println("Error")
+		}
 	}
 	if op.OpType == OPERATION_MOVE {
 		sm.printOpBrief(op)
 		config, ok = sm.makeMove(op, configNum)
+		if ok {
+			fmt.Println("Move ", op, " ", config, " Op ", op.GID, " Node ", sm.me)
+		} else {
+			fmt.Println("Error")
+		}
 	}
 	if op.OpType == OPERATION_QUERY {
 		sm.printOpBrief(op)
 		config, ok = sm.doQuery(op.Num)
+		if ok {
+			//fmt.Println("Query ", config)
+		}
 		return config
 	}
 	if !ok {
@@ -195,7 +212,7 @@ func (sm *ShardMaster) balanceLeave(config Config, configNum int) Config {
 				shardsToMove = len(freeShards) - moved
 			}
 			for i := moved; i  < moved + shardsToMove; i++ {
-				fmt.Println(i, " ", len(freeShards), " ", gid, " ", target, " ", shardsToMove, " ", moved)
+				//fmt.Println(i, " ", len(freeShards), " ", gid, " ", target, " ", shardsToMove, " ", moved)
 				config.Shards[freeShards[i]] = gid
 			}
 			moved += shardsToMove
@@ -205,22 +222,21 @@ func (sm *ShardMaster) balanceLeave(config Config, configNum int) Config {
 	return config
 }
 
+// Should count group number in Groups instead of Shards
 func (sm *ShardMaster) countShards(config Config) (map[int64][]int, []int) {
 	shardDist := make(map[int64][]int) // GID -> shard numbers
 	freeShards := make([]int, 0)
+	for gid, _ := range config.Groups {
+		shardDist[gid] = make([]int, 0)
+	}
+	
 	for index, gid := range config.Shards {
 		var shard []int
 		if gid == EMPTY_NUMBER {
 			freeShards = append(freeShards, index)
 			continue
 		}
-		_, exist := shardDist[gid]
-		if !exist {
-			shard = make([]int, 0)
-		} else {
-			shard = shardDist[gid] // shard is []int
-		}
-		shard = append(shard, index)
+		shard = append(shardDist[gid], index)
 		shardDist[gid] = shard
 	}
 	return shardDist, freeShards
@@ -231,12 +247,12 @@ func (sm *ShardMaster) validateInput(config Config, gid int64, opType int) bool 
 	lengthGroups := len(config.Groups)
 	if lengthGroups >= NShards && opType == OPERATION_JOIN {
 		fmt.Println("Waster groups")
-		return false
+		//return false
 	}
 	
 	if lengthGroups == 0 && opType == OPERATION_LEAVE {
 		fmt.Println("Cannot leave, reach 0")
-		return false
+		//return false
 	}
 	
 	if _, exist := config.Groups[gid]; exist && opType == OPERATION_JOIN {
@@ -265,7 +281,7 @@ func (sm *ShardMaster) makeJoin(op Op, configNum int) (Config, bool) {
 
 func (sm *ShardMaster) makeLeave(op Op, configNum int) (Config, bool) {
 	leaveConfig := sm.initNewConfig(configNum)
-	fmt.Println("Config before leave ", leaveConfig, " and leave GID is ", op.GID)
+	//fmt.Println("Config before leave ", leaveConfig, " and leave GID is ", op.GID)
 	ok := sm.validateInput(leaveConfig, op.GID, op.OpType)
 	if !ok {
 		return leaveConfig, false
@@ -277,7 +293,7 @@ func (sm *ShardMaster) makeLeave(op Op, configNum int) (Config, bool) {
 	}
 	delete(leaveConfig.Groups, op.GID)
 	leaveConfig = sm.balanceLeave(leaveConfig, configNum)
-	fmt.Println("Config after leave ", leaveConfig)
+	//fmt.Println("Config after leave ", leaveConfig)
 	return leaveConfig, true
 }
 
