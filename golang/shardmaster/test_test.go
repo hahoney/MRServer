@@ -137,11 +137,15 @@ func TestBasic(t *testing.T) {
 
   fmt.Printf("  ... Passed\n")
 
+// Query number is configure number !!!!!! NOT operation number
+// query does not change config, so any query operations do not
+// increase config query after query is still the same
   fmt.Printf("Test: Historical queries ...\n")
 
   for i := 0; i < len(cfa); i++ {
     c := ck.Query(cfa[i].Num)
     if c.Num != cfa[i].Num {
+		fmt.Println(c.Num, " ", cfa[i].Num)
       t.Fatalf("historical Num wrong")
     }
     if c.Shards != cfa[i].Shards {
@@ -214,7 +218,7 @@ func TestBasic(t *testing.T) {
 
   fmt.Printf("Test: Concurrent leave/join ...\n")
 
-  const npara = 3
+  const npara = 10
   gids := make([]int64, npara)
   var ca [npara]chan bool
   for xi := 0; xi < npara; xi++ {
@@ -234,7 +238,7 @@ func TestBasic(t *testing.T) {
   check(t, gids, ck)
 
   fmt.Printf("  ... Passed\n")
-return
+
   fmt.Printf("Test: Min advances after joins ...\n")
 
   for i, sm := range(sma) {
@@ -283,7 +287,7 @@ return
   fmt.Printf("  ... Passed\n")
 }
 
-func testUnreliable(t *testing.T) {
+func TestUnreliable(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
@@ -334,7 +338,7 @@ func testUnreliable(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func testFreshQuery(t *testing.T) {
+func TestFreshQuery(t *testing.T) {
   runtime.GOMAXPROCS(4)
 
   const nservers = 3
