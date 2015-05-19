@@ -9,8 +9,9 @@ import "fmt"
 type Clerk struct {
   mu sync.Mutex // one RPC at a time
   sm *shardmaster.Clerk
-  config shardmaster.Config
+  config shardmaster.Config  // the curren config client knows
   // You'll have to modify Clerk.
+  me string
 }
 
 
@@ -19,6 +20,8 @@ func MakeClerk(shardmasters []string) *Clerk {
   ck := new(Clerk)
   ck.sm = shardmaster.MakeClerk(shardmasters)
   // You'll have to modify MakeClerk.
+  ck.me = nrand()
+
   return ck
 }
 
@@ -90,7 +93,7 @@ func (ck *Clerk) Get(key string) string {
     if ok {
       // try each server in the shard's replication group.
       for _, srv := range servers {
-        args := &GetArgs{}
+        args := &GetArgs{Key: key, TimeStamp: GeneratePaxosNumber(), Client: ck.me}
         args.Key = key
         var reply GetReply
         ok := call(srv, "ShardKV.Get", args, &reply)
@@ -127,7 +130,7 @@ func (ck *Clerk) PutExt(key string, value string, dohash bool) string {
     if ok {
       // try each server in the shard's replication group.
       for _, srv := range servers {
-        args := &PutArgs{}
+        args := &PutArgs{Key: key, Value: value, DoHash: dohash, TimeStamp: GeneratePaxosNumber(), Client: ck.me }
         args.Key = key
         args.Value = value
         args.DoHash = dohash

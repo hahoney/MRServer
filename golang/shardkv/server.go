@@ -15,6 +15,11 @@ import "shardmaster"
 
 const Debug=0
 
+const (
+	GET_TYPE = 1
+	PUT_TYPE = 2
+)
+
 func DPrintf(format string, a ...interface{}) (n int, err error) {
         if Debug > 0 {
                 log.Printf(format, a...)
@@ -25,6 +30,12 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 type Op struct {
   // Your definitions here.
+  Key string
+  Value string
+  DoHash bool
+  TimeStamp int64
+  OpType int
+  Client string
 }
 
 
@@ -40,24 +51,63 @@ type ShardKV struct {
   gid int64 // my replica group ID
 
   // Your definitions here.
+  kvStore map[string]string // key -> value
+  prevValue map[string]string   // client -> value
+  curOp int // current operation number
+  curConfig *shardmaster.Config // current config
+
+}
+
+
+// Auxiliary functions
+// reach agreement within group
+func (kv *ShardKV) reachPaxosAgreement(op Op) string {
+	var prevValue string
+	if op.OpType == PUT_TYPE {
+		value := op.Value
+		prevValue = kv.prevValue[op.Client]
+		if op.DoHash {
+			value = HashValue(prevValue, value)
+		}
+		kv.kvStore[op.Key] = value
+		kv.prevValue[op.Client] = value
+		return prevValue
+	}
+	return kv.kvStore[op.Key]
 }
 
 
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
+  key := args.Key
+  op := Op{Key: key, TimeStamp: args.TimeStamp, OpType: GET_TYPE, Client: args.Client}
+  reply.Value = kv.reachPaxosAgreement(op)
+  reply.Err = OK
+//fmt.Println(kv.me)
   return nil
 }
 
+
 func (kv *ShardKV) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
+  key, value, doHash := args.Key, args.Value, args.DoHash
+  op := Op{Key: key, Value: value, TimeStamp: args.TimeStamp, OpType: PUT_TYPE, Client: args.Client, DoHash: doHash}
+  prevValue := kv.reachPaxosAgreement(op)
+  if doHash {
+	reply.PreviousValue = prevValue
+  }
+  reply.Err = OK
+//fmt.Println(kv.me)
   return nil
 }
+
 
 //
 // Ask the shardmaster if there's a new configuration;
 // if so, re-configure.
 //
 func (kv *ShardKV) tick() {
+	config := kv.sm.Query(-1)
 }
 
 
@@ -88,6 +138,8 @@ func StartServer(gid int64, shardmasters []string,
 
   // Your initialization code here.
   // Don't call Join().
+  kv.kvStore = make(map[string]string)
+  kv.prevValue = make(map[string]string)
 
   rpcs := rpc.NewServer()
   rpcs.Register(kv)
