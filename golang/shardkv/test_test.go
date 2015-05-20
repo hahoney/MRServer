@@ -79,7 +79,7 @@ func setup(tag string, unreliable bool) ([]string, []int64, [][]string, [][]*Sha
   return smh, gids, ha, sa, clean
 }
 
-func TestBasic(t *testing.T) {
+func testBasic(t *testing.T) {
   smh, gids, ha, _, clean := setup("basic", false)
   defer clean()
 

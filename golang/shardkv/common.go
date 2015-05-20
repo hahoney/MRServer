@@ -50,6 +50,18 @@ type GetReply struct {
   Value string
 }
 
+// zy
+type MigrateArgs struct {
+	ShardIndex int
+}
+
+type MigrateReply struct {
+	kvShard map[string]string // kv store of a shard
+	prevValue map[string]string
+}
+
+
+
 
 func hash(s string) uint32 {
   h := fnv.New32a()
