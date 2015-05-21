@@ -18,7 +18,7 @@ const Debug=0
 const (
 	GET_TYPE = 1
 	PUT_TYPE = 2
-	MIGRATE_SHARD_TYPE = 3
+	RECONFIGURE_TYPE = 3
 )
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -37,6 +37,7 @@ type Op struct {
   TimeStamp int64
   OpType int
   Client string
+  NewConfig shardmaster.Config
 }
 
 
@@ -54,6 +55,7 @@ type ShardKV struct {
   // Your definitions here.
   kvStore map[string]string // key -> value
   prevValue map[string]string   // client -> value
+  seen map[string]int64  // highest seen number
   curOp int // current operation number
   curConfig shardmaster.Config // current config
 
@@ -63,30 +65,86 @@ type ShardKV struct {
 // Auxiliary functions
 // reach agreement within group
 func (kv *ShardKV) reachPaxosAgreement(op Op) string {
-	var prevValue string
-	if op.OpType == PUT_TYPE {
-		value := op.Value
-		prevValue = kv.prevValue[op.Client]
-		if op.DoHash {
-			value = HashValue(prevValue, value)
+	var result Op
+	for {
+		seq := kv.curOp + 1
+		decided, log := kv.px.Status(seq)
+		if decided {
+			result = log.(Op)
+		} else {
+			kv.px.Start(seq, op)
+			result = kv.wait(seq)
 		}
-		kv.kvStore[op.Key] = value
-		kv.prevValue[op.Client] = value
-		return prevValue
+		kv.applyOperation(result)
+		if result.TimeStamp == op.TimeStamp {
+			break
+		}
 	}
-	return kv.kvStore[op.Key]
+	return kv.prevValue[op.Client]
+}
+
+
+func (kv *ShardKV) wait(seq int) Op {
+	to := 10 * time.Millisecond
+	for {
+		decided, val := kv.px.Status(seq)
+		if decided{
+			return val.(Op)
+		}
+		time.Sleep(to)
+		if to < 10 * time.Second{
+			to *= 2
+		}
+	}
 }
 
 func (kv *ShardKV) applyOperation(op Op) {
-	if 
+	if op.OpType == PUT_TYPE {
+		kv.applyPut(op)
+	}
+	if op.OpType == GET_TYPE {
+		kv.applyGet(op)
+	}
+	if op.OpType == RECONFIGURE_TYPE {
+		kv.applyReconfigure(op)
+	}
+	kv.curOp++
+	kv.px.Done(kv.curOp)
 }
+
+func (kv *ShardKV) applyPut(op Op) {
+	prev, _ := kv.kvStore[op.Key]
+	kv.prevValue[op.Client] = prev
+	kv.seen[op.Client] = op.TimeStamp
+	if op.DoHash {
+		kv.kvStore[op.Key] = HashValue(prev, op.Value)
+	} else {
+		kv.kvStore[op.Key] = op.Value
+	}
+}
+
+// if not exist send ""
+func (kv *ShardKV) applyGet(op Op) {
+	prev, _ := kv.kvStore[op.Key]
+	kv.prevValue[op.Client] = prev
+	kv.seen[op.Client] = op.TimeStamp
+}
+
+func (kv *ShardKV) applyReconfigure(op Op) {
+	newConfig := op.NewConfig
+	kv.migrateKVShards(newConfig)
+	fmt.Println(kv.me, " newConfig is ", newConfig.Num)
+	kv.curConfig = newConfig
+}
+
 
 
 func (kv *ShardKV) reconfigure(config shardmaster.Config) {
 	curConfig := kv.curConfig
 	for i := curConfig.Num + 1; i <= config.Num; i++ {
 		newConfig := kv.sm.Query(i)
-		kv.migrateKVShards(newConfig)	
+		op := Op{OpType: RECONFIGURE_TYPE, NewConfig: newConfig}
+		kv.reachPaxosAgreement(op)
 	}
 }
 
@@ -101,7 +159,7 @@ func (kv *ShardKV) migrateKVShards(newConfig shardmaster.Config) {
 			args := &MigrateArgs{ShardIndex: index}
 			reply := &MigrateReply{}
 			for _, server := range oldConfig.Groups[gid] {
-				ok = call(server, "MigrateShard", args, reply) // copy kvserver from current group to future group
+				ok = call(server, "ShardKV.MigrateShard", args, reply) // copy kvserver from current group to future group
 				if ok {
 					break
 				}
@@ -161,6 +219,8 @@ func (kv *ShardKV) tick() {
 	defer kv.mu.Unlock()
 	config := kv.sm.Query(-1)
 	if config.Num != kv.curConfig.Num {
+		fmt.Println("Config changed!!!! ", config.Num, " ", kv.curConfig.Num)
+		//fmt.Println("Config changed!!!!")
 		kv.reconfigure(config)		
 	}
 }
@@ -195,6 +255,7 @@ func StartServer(gid int64, shardmasters []string,
   // Don't call Join().
   kv.kvStore = make(map[string]string)
   kv.prevValue = make(map[string]string)
+  kv.seen = make(map[string]int64)
 
   rpcs := rpc.NewServer()
   rpcs.Register(kv)
