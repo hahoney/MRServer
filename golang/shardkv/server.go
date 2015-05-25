@@ -64,8 +64,27 @@ type ShardKV struct {
 
 // Auxiliary functions
 // reach agreement within group
-func (kv *ShardKV) reachPaxosAgreement(op Op) string {
+func (kv *ShardKV) reachPaxosAgreement(op Op) (Err, string) {
 	var result Op
+	
+	if op.OpType == RECONFIGURE_TYPE {
+		if kv.curConfig.Num >= op.NewConfig.Num {
+			return OK, ""
+		}
+	}
+	if op.OpType == PUT_TYPE || op.OpType == GET_TYPE {
+		shard := key2shard(op.Key)
+		if kv.gid != kv.curConfig.Shards[shard] {
+			fmt.Println("Wrong group")
+//			return ErrWrongGroup, ""
+		}
+		// same as kvpaxos
+		timeStamp, exist := kv.seen[op.Client]
+		if exist && op.TimeStamp <= timeStamp {
+			return OK, kv.prevValue[op.Client]
+		}
+	}
+	
 	for {
 		seq := kv.curOp + 1
 		decided, log := kv.px.Status(seq)
@@ -80,7 +99,7 @@ func (kv *ShardKV) reachPaxosAgreement(op Op) string {
 			break
 		}
 	}
-	return kv.prevValue[op.Client]
+	return OK, kv.prevValue[op.Client]
 }
 
 
@@ -128,15 +147,15 @@ func (kv *ShardKV) applyGet(op Op) {
 	prev, _ := kv.kvStore[op.Key]
 	kv.prevValue[op.Client] = prev
 	kv.seen[op.Client] = op.TimeStamp
+	//fmt.Println("The kv store is ", kv.kvStore)
 }
 
 func (kv *ShardKV) applyReconfigure(op Op) {
 	newConfig := op.NewConfig
 	kv.migrateKVShards(newConfig)
-	fmt.Println(kv.me, " newConfig is ", newConfig.Num)
+	//fmt.Println(kv.me, " newConfig is ", newConfig.Num)
 	kv.curConfig = newConfig
 }
-
 
 
 func (kv *ShardKV) reconfigure(config shardmaster.Config) {
@@ -145,6 +164,7 @@ func (kv *ShardKV) reconfigure(config shardmaster.Config) {
 		newConfig := kv.sm.Query(i)
 		op := Op{OpType: RECONFIGURE_TYPE, NewConfig: newConfig}
 		kv.reachPaxosAgreement(op)
+		//fmt.Println("!!!", newConfig)
 	}
 }
 
@@ -190,8 +210,8 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) error {
   // Your code here.
   key := args.Key
   op := Op{Key: key, TimeStamp: args.TimeStamp, OpType: GET_TYPE, Client: args.Client}
-  reply.Value = kv.reachPaxosAgreement(op)
-  reply.Err = OK
+  reply.Err, reply.Value = kv.reachPaxosAgreement(op)
+//fmt.Println("Get key ", op.Key, " Value ", reply.Value,  " kvstore ", kv.kvStore)
   return nil
 }
 
@@ -200,11 +220,12 @@ func (kv *ShardKV) Put(args *PutArgs, reply *PutReply) error {
   // Your code here.
   key, value, doHash := args.Key, args.Value, args.DoHash
   op := Op{Key: key, Value: value, TimeStamp: args.TimeStamp, OpType: PUT_TYPE, Client: args.Client, DoHash: doHash}
-  prevValue := kv.reachPaxosAgreement(op)
+  var errorMsg Err
+  errorMsg, prevValue := kv.reachPaxosAgreement(op)
   if doHash {
 	reply.PreviousValue = prevValue
   }
-  reply.Err = OK
+  reply.Err = errorMsg
 //fmt.Println(kv.me)
   return nil
 }
@@ -219,8 +240,7 @@ func (kv *ShardKV) tick() {
 	defer kv.mu.Unlock()
 	config := kv.sm.Query(-1)
 	if config.Num != kv.curConfig.Num {
-		fmt.Println("Config changed!!!! ", config.Num, " ", kv.curConfig.Num)
-		//fmt.Println("Config changed!!!!")
+		fmt.Println(kv.me, " Config changed!!!! ", config.Num, " ", kv.curConfig.Num, " Config ", kv.curConfig)
 		kv.reconfigure(config)		
 	}
 }

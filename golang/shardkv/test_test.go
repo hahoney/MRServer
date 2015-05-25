@@ -79,7 +79,7 @@ func setup(tag string, unreliable bool) ([]string, []int64, [][]string, [][]*Sha
   return smh, gids, ha, sa, clean
 }
 
-func testBasic(t *testing.T) {
+func TestBasic(t *testing.T) {
   smh, gids, ha, _, clean := setup("basic", false)
   defer clean()
 
@@ -141,7 +141,7 @@ func testBasic(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func TestMove(t *testing.T) {
+func testMove(t *testing.T) {
   smh, gids, ha, _, clean := setup("move", false)
   defer clean()
 
@@ -160,19 +160,22 @@ func TestMove(t *testing.T) {
   // add group 1.
   mck.Join(gids[1], ha[1])
   time.Sleep(5 * time.Second)
-  
+
   // check that keys are still there.
   for i := 0; i < shardmaster.NShards; i++ {
     if ck.Get(string('0'+i)) != string('0'+i) {
+		fmt.Println()
       t.Fatalf("missing key/value")
     }
   }
 
   // remove sockets from group 0.
+  // what is the result of this? How does th server know config change?
   for i := 0; i < len(ha[0]); i++ {
     os.Remove(ha[0][i])
   }
 
+return
   count := 0
   var mu sync.Mutex
   for i := 0; i < shardmaster.NShards; i++ {
