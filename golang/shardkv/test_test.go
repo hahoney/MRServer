@@ -141,7 +141,7 @@ func TestBasic(t *testing.T) {
   fmt.Printf("  ... Passed\n")
 }
 
-func testMove(t *testing.T) {
+func TestMove(t *testing.T) {
   smh, gids, ha, _, clean := setup("move", false)
   defer clean()
 
@@ -175,7 +175,6 @@ func testMove(t *testing.T) {
     os.Remove(ha[0][i])
   }
 
-return
   count := 0
   var mu sync.Mutex
   for i := 0; i < shardmaster.NShards; i++ {

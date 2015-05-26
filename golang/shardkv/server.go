@@ -63,10 +63,7 @@ type ShardKV struct {
 
 
 // Auxiliary functions
-// reach agreement within group
-func (kv *ShardKV) reachPaxosAgreement(op Op) (Err, string) {
-	var result Op
-	
+func (kv *ShardKV) CheckOp(op Op) (Err, string) {
 	if op.OpType == RECONFIGURE_TYPE {
 		if kv.curConfig.Num >= op.NewConfig.Num {
 			return OK, ""
@@ -76,7 +73,7 @@ func (kv *ShardKV) reachPaxosAgreement(op Op) (Err, string) {
 		shard := key2shard(op.Key)
 		if kv.gid != kv.curConfig.Shards[shard] {
 			fmt.Println("Wrong group")
-//			return ErrWrongGroup, ""
+			return ErrWrongGroup, ""
 		}
 		// same as kvpaxos
 		timeStamp, exist := kv.seen[op.Client]
@@ -84,8 +81,18 @@ func (kv *ShardKV) reachPaxosAgreement(op Op) (Err, string) {
 			return OK, kv.prevValue[op.Client]
 		}
 	}
-	
+	return "", ""
+}
+
+// reach agreement within group
+func (kv *ShardKV) reachPaxosAgreement(op Op) (Err, string) {
+	var result Op
+		
 	for {
+		//res, ret := kv.CheckOp(op)
+		//if res != "" {
+			//return res, ret
+		//}
 		seq := kv.curOp + 1
 		decided, log := kv.px.Status(seq)
 		if decided {
@@ -152,8 +159,16 @@ func (kv *ShardKV) applyGet(op Op) {
 
 func (kv *ShardKV) applyReconfigure(op Op) {
 	newConfig := op.NewConfig
-	kv.migrateKVShards(newConfig)
-	//fmt.Println(kv.me, " newConfig is ", newConfig.Num)
+	for key, value := range kv.kvStore {
+		shard := key2shard(key)
+		if shard == args.ShardIndex {
+			reply.kvShard[key] = value
+		}
+	}
+	for client, value := range kv.prevValue {
+		reply.prevValue[client] = value
+	}
+	return nil
 	kv.curConfig = newConfig
 }
 
